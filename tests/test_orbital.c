@@ -116,6 +116,7 @@ int test_bielliptic_transfer(void) {
     float rb = 20.0f * r2; /* Very high intermediate */
     
     lg_transfer_solution_t hohm = lg_transfer_hohmann(mu, r1, r2);
+    (void)hohm;
     lg_transfer_solution_t biell = lg_transfer_bielliptic(mu, r1, r2, rb);
     
     /* Bi-elliptic should have 3 burns */
@@ -133,6 +134,7 @@ int test_bielliptic_transfer(void) {
     /* Now test with extreme ratio > 11.94 */
     float r_big = r1 * 20.0f;
     lg_transfer_solution_t hohm2 = lg_transfer_hohmann(mu, r1, r_big);
+    (void)hohm2;
     lg_transfer_solution_t biell2 = lg_transfer_bielliptic(mu, r1, r_big, r_big * 5.0f);
     ASSERT_TRUE(biell2.dv_total > 0.0f);
     /* bielliptic_wins requires rb_limit > 5*max(r1,r2); use 6x to satisfy strict inequality */

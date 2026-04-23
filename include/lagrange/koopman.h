@@ -24,6 +24,12 @@
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(_WIN32)
+#include <malloc.h>
+#else
+#include <alloca.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -114,7 +120,7 @@ static inline float complex lg_koop_observable_hermite(const lg_vec3_t* pos,
         case 0: return 1.0f;
         case 1: return r2 + v2;  /* Energy-like */
         case 2: return (r2 + v2) * (r2 + v2) - 2.0f;
-        default: return cpowf(r2 + v2, order * 0.5f);
+        default: return cpowf(r2 + v2, (float)order * 0.5f);
     }
 }
 
@@ -142,7 +148,7 @@ typedef struct {
 /* Solve A * X = B for X using Gaussian elimination with partial pivoting.
  * A is n x n (column-major), B is n x nrhs (column-major). Both overwritten. */
 static inline bool lg_koopman_solve_complex(int n, float complex* A, int nrhs, float complex* B) {
-    int* ipiv = (int*)alloca(n * sizeof(int));
+    int* ipiv = (int*)alloca((size_t)n * sizeof(int));
     
     for (int k = 0; k < n; k++) {
         int max_row = k;
@@ -204,7 +210,7 @@ static inline void _lg_koopman_fit_core(lg_koopman_t* km, const lg_koop_data_t* 
     int S = km->n_states;
     
     /* Gram matrix G = Psi_X * Psi_X^H */
-    float complex* G = (float complex*)calloc(D * D, sizeof(float complex));
+    float complex* G = (float complex*)calloc((size_t)D * (size_t)D, sizeof(float complex));
     for (int i = 0; i < D; i++) {
         for (int j = 0; j < D; j++) {
             for (int n = 0; n < N; n++) {
@@ -217,7 +223,7 @@ static inline void _lg_koopman_fit_core(lg_koopman_t* km, const lg_koop_data_t* 
     for (int i = 0; i < D; i++) G[i + i*D] += 1e-6f;
     
     /* A = Psi_Y * Psi_X^H */
-    float complex* A = (float complex*)calloc(D * D, sizeof(float complex));
+    float complex* A = (float complex*)calloc((size_t)D * (size_t)D, sizeof(float complex));
     for (int i = 0; i < D; i++) {
         for (int j = 0; j < D; j++) {
             for (int n = 0; n < N; n++) {
@@ -227,19 +233,19 @@ static inline void _lg_koopman_fit_core(lg_koopman_t* km, const lg_koop_data_t* 
     }
     
     /* Solve G * K^H = A^H for K */
-    float complex* X = (float complex*)calloc(D * D, sizeof(float complex));
+    float complex* X = (float complex*)calloc((size_t)D * (size_t)D, sizeof(float complex));
     for (int i = 0; i < D; i++) {
         for (int j = 0; j < D; j++) {
             X[j + i*D] = conjf(A[i + j*D]);
         }
     }
     
-    float complex* G_copy = (float complex*)calloc(D * D, sizeof(float complex));
+    float complex* G_copy = (float complex*)calloc((size_t)D * (size_t)D, sizeof(float complex));
     memcpy(G_copy, G, D * D * sizeof(float complex));
     lg_koopman_solve_complex(D, G_copy, D, X);
     
     free(km->K);
-    km->K = (float complex*)calloc(D * D, sizeof(float complex));
+    km->K = (float complex*)calloc((size_t)D * (size_t)D, sizeof(float complex));
     for (int i = 0; i < D; i++) {
         for (int j = 0; j < D; j++) {
             km->K[i + j*D] = conjf(X[j + i*D]);
@@ -247,7 +253,7 @@ static inline void _lg_koopman_fit_core(lg_koopman_t* km, const lg_koop_data_t* 
     }
     
     /* Projection matrix P: maps observables back to state space via least squares */
-    float complex* Bmat = (float complex*)calloc(S * D, sizeof(float complex));
+    float complex* Bmat = (float complex*)calloc((size_t)S * (size_t)D, sizeof(float complex));
     for (int i = 0; i < S; i++) {
         for (int j = 0; j < D; j++) {
             for (int n = 0; n < N; n++) {
@@ -256,7 +262,7 @@ static inline void _lg_koopman_fit_core(lg_koopman_t* km, const lg_koop_data_t* 
         }
     }
     
-    float complex* X2 = (float complex*)calloc(D * S, sizeof(float complex));
+    float complex* X2 = (float complex*)calloc((size_t)D * (size_t)S, sizeof(float complex));
     for (int i = 0; i < S; i++) {
         for (int j = 0; j < D; j++) {
             X2[j + i*D] = conjf(Bmat[i + j*S]);
@@ -267,7 +273,7 @@ static inline void _lg_koopman_fit_core(lg_koopman_t* km, const lg_koop_data_t* 
     lg_koopman_solve_complex(D, G_copy, S, X2);
     
     free(km->P);
-    km->P = (float complex*)calloc(S * D, sizeof(float complex));
+    km->P = (float complex*)calloc((size_t)S * (size_t)D, sizeof(float complex));
     for (int i = 0; i < S; i++) {
         for (int j = 0; j < D; j++) {
             km->P[i + j*S] = conjf(X2[j + i*D]);
@@ -290,8 +296,8 @@ static inline void lg_koopman_fit(lg_koopman_t* km, const lg_koop_data_t* data) 
     
     /* Allocate observable matrices */
     free(km->Psi);
-    km->Psi = (float complex*)calloc(D * N, sizeof(float complex));
-    float complex* Psi_Y = (float complex*)calloc(D * N, sizeof(float complex));
+    km->Psi = (float complex*)calloc((size_t)D * (size_t)N, sizeof(float complex));
+    float complex* Psi_Y = (float complex*)calloc((size_t)D * (size_t)N, sizeof(float complex));
     
     /* Compute observables at X and Y */
     for (int n = 0; n < N; n++) {
@@ -330,13 +336,13 @@ static inline void lg_koopman_predict(const lg_koopman_t* km,
     int S = km->n_states;
     
     /* Lift current state to observable space */
-    float complex* psi = (float complex*)alloca(D * sizeof(float complex));
+    float complex* psi = (float complex*)alloca((size_t)D * sizeof(float complex));
     for (int k = 0; k < D; k++) {
         psi[k] = lg_koop_observable_dct(pos_in, vel_in, km->frequencies[k], k);
     }
     
     /* Apply K^n_steps via repeated matrix multiply */
-    float complex* psi_next = (float complex*)alloca(D * sizeof(float complex));
+    float complex* psi_next = (float complex*)alloca((size_t)D * sizeof(float complex));
     
     for (int step = 0; step < n_steps; step++) {
         for (int i = 0; i < D; i++) {
@@ -394,16 +400,16 @@ static inline lg_vec3_t lg_koopman_mpc_control(const lg_koopman_t* km,
     int S = km->n_states;
     
     /* Lift current state */
-    float complex* psi = (float complex*)alloca(D * sizeof(float complex));
+    float complex* psi = (float complex*)alloca((size_t)D * sizeof(float complex));
     for (int k = 0; k < D; k++) {
         psi[k] = lg_koop_observable_dct(current_pos, current_vel, km->frequencies[k], k);
     }
     
     /* Propagate forward over the MPC horizon: psi_pred = K^horizon * psi */
-    float complex* psi_pred = (float complex*)alloca(D * sizeof(float complex));
+    float complex* psi_pred = (float complex*)alloca((size_t)D * sizeof(float complex));
     memcpy(psi_pred, psi, D * sizeof(float complex));
     for (int step = 0; step < mpc->horizon; step++) {
-        float complex* tmp = (float complex*)alloca(D * sizeof(float complex));
+        float complex* tmp = (float complex*)alloca((size_t)D * sizeof(float complex));
         for (int i = 0; i < D; i++) {
             tmp[i] = 0;
             for (int j = 0; j < D; j++) {
@@ -414,7 +420,7 @@ static inline lg_vec3_t lg_koopman_mpc_control(const lg_koopman_t* km,
     }
     
     /* Error in lifted space */
-    float complex* psi_err = (float complex*)alloca(D * sizeof(float complex));
+    float complex* psi_err = (float complex*)alloca((size_t)D * sizeof(float complex));
     for (int k = 0; k < D; k++) {
         psi_err[k] = mpc->target_psi[k] - psi_pred[k];
     }
@@ -464,8 +470,8 @@ static inline void lg_fractional_koopman_fit(lg_fractional_koopman_t* fkm,
     int N = data->n_snapshots;
     int S = fkm->base.n_states;
     
-    float complex* Psi_X = (float complex*)calloc(D_frac * N, sizeof(float complex));
-    float complex* Psi_Y = (float complex*)calloc(D_frac * N, sizeof(float complex));
+    float complex* Psi_X = (float complex*)calloc((size_t)D_frac * (size_t)N, sizeof(float complex));
+    float complex* Psi_Y = (float complex*)calloc((size_t)D_frac * (size_t)N, sizeof(float complex));
     
     /* Standard observables (first half) */
     for (int n = 0; n < N; n++) {
@@ -532,7 +538,7 @@ static inline void lg_fractional_koopman_predict(lg_fractional_koopman_t* fkm,
     lg_vec3_t memory = lg_fractional_integral_direct(fkm->frac);
     
     /* Lift to augmented observable space */
-    float complex* psi = (float complex*)alloca(D * sizeof(float complex));
+    float complex* psi = (float complex*)alloca((size_t)D * sizeof(float complex));
     for (int k = 0; k < D_orig; k++) {
         psi[k] = lg_koop_observable_dct(&pos, &vel, fkm->base.frequencies[k], k);
         lg_vec3_t pos_mem = lg_vec3_add(pos, memory);
@@ -540,7 +546,7 @@ static inline void lg_fractional_koopman_predict(lg_fractional_koopman_t* fkm,
     }
     
     /* Apply K^n_steps */
-    float complex* psi_next = (float complex*)alloca(D * sizeof(float complex));
+    float complex* psi_next = (float complex*)alloca((size_t)D * sizeof(float complex));
     for (int step = 0; step < n_steps; step++) {
         for (int i = 0; i < D; i++) {
             psi_next[i] = 0;
@@ -591,7 +597,7 @@ static inline void lg_koopman_init_cheap_compatible(lg_koopman_t* km, int n, flo
     
     /* Use same frequency grid as CHEAP's fBm eigenvalues */
     for (int k = 0; k < n; k++) {
-        km->frequencies[k] = M_PI * (k + 0.5f) / n;  /* DCT-II frequencies */
+        km->frequencies[k] = LG_PI * (k + 0.5f) / n;  /* DCT-II frequencies */
         km->scales[k] = powf(k + 1.0f, -hurst - 0.5f); /* Power law scaling */
     }
 }

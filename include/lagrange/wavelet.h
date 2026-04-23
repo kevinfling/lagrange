@@ -21,6 +21,12 @@
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(_WIN32)
+#include <malloc.h>
+#else
+#include <alloca.h>
+#endif
 #include <stdbool.h>
 
 #ifdef __cplusplus
@@ -63,7 +69,7 @@ typedef struct {
  * Update: s = e + d/2 (smooth is average)
  */
 static inline void lg_wavelet_haar_forward(float* data, int n) {
-    float* tmp = (float*)alloca(n * sizeof(float));
+    float* tmp = (float*)alloca((size_t)n * sizeof(float));
     
     for (int i = 0; i < n; i += 2) {
         float even = data[i];
@@ -77,7 +83,7 @@ static inline void lg_wavelet_haar_forward(float* data, int n) {
 }
 
 static inline void lg_wavelet_haar_inverse(float* data, int n) {
-    float* tmp = (float*)alloca(n * sizeof(float));
+    float* tmp = (float*)alloca((size_t)n * sizeof(float));
     
     for (int i = 0; i < n/2; i++) {
         float smooth = data[i];
@@ -103,7 +109,7 @@ static inline void lg_wavelet_d4_forward(float* data, int n) {
         -0.129409522551260f, -0.224143868042013f,
          0.836516303737808f, -0.482962913144534f
     };
-    float* tmp = (float*)alloca(n * sizeof(float));
+    float* tmp = (float*)alloca((size_t)n * sizeof(float));
     for (int i = 0; i < n/2; i++) {
         float s = 0.0f, d = 0.0f;
         for (int k = 0; k < 4; k++) {
@@ -126,7 +132,7 @@ static inline void lg_wavelet_d4_inverse(float* data, int n) {
         -0.129409522551260f, -0.224143868042013f,
          0.836516303737808f, -0.482962913144534f
     };
-    float* tmp = (float*)alloca(n * sizeof(float));
+    float* tmp = (float*)alloca((size_t)n * sizeof(float));
     memset(tmp, 0, n * sizeof(float));
     for (int i = 0; i < n/2; i++) {
         float s = data[i];
@@ -150,7 +156,7 @@ static inline void lg_wavelet_cdf97_forward(float* data, int n) {
     static const float delta = 0.4435068522f;
     static const float K     = 1.149604398f;
     static const float invK  = 0.869864452f;
-    float* tmp = (float*)alloca(n * sizeof(float));
+    float* tmp = (float*)alloca((size_t)n * sizeof(float));
     memcpy(tmp, data, n * sizeof(float));
     int half = n / 2;
     /* Predict 1 */
@@ -191,7 +197,7 @@ static inline void lg_wavelet_cdf97_inverse(float* data, int n) {
     static const float delta = 0.4435068522f;
     static const float K     = 1.149604398f;
     static const float invK  = 0.869864452f;
-    float* tmp = (float*)alloca(n * sizeof(float));
+    float* tmp = (float*)alloca((size_t)n * sizeof(float));
     int half = n / 2;
     for (int i = 0; i < half; i++) {
         tmp[2*i] = data[i] / K;
@@ -229,7 +235,7 @@ static inline void lg_wavelet_cdf97_inverse(float* data, int n) {
  *===========================================================================*/
 
 static inline void lg_wavelet_dm53_forward(float* data, int n) {
-    float* tmp = (float*)alloca(n * sizeof(float));
+    float* tmp = (float*)alloca((size_t)n * sizeof(float));
     memcpy(tmp, data, n * sizeof(float));
     int half = n / 2;
     /* Predict */
@@ -253,7 +259,7 @@ static inline void lg_wavelet_dm53_forward(float* data, int n) {
 }
 
 static inline void lg_wavelet_dm53_inverse(float* data, int n) {
-    float* tmp = (float*)alloca(n * sizeof(float));
+    float* tmp = (float*)alloca((size_t)n * sizeof(float));
     int half = n / 2;
     float s = sqrtf(2.0f);
     for (int i = 0; i < half; i++) {
@@ -289,8 +295,8 @@ static inline void lg_wavelet_morlet_transform(const float* signal, int n,
             for (int tau = 0; tau < n; tau++) {
                 float u = ((float)(tau - t)) / scale;
                 float gauss = expf(-u * u / (2.0f * sigma * sigma));
-                float c = cosf(2.0f * M_PI * freq * u);
-                float s_wave = sinf(2.0f * M_PI * freq * u);
+                float c = cosf(2.0f * LG_PI * freq * u);
+                float s_wave = sinf(2.0f * LG_PI * freq * u);
                 sum_r += signal[tau] * gauss * c;
                 sum_i += signal[tau] * gauss * s_wave;
             }
@@ -450,7 +456,7 @@ static inline void lg_wavelet_fractional_diff(const lg_wavelet_fractional_t* wf,
                                               float* signal_out,
                                               float alpha) {
     int n = wf->base.n;
-    float* coeffs = (float*)alloca(n * sizeof(float));
+    float* coeffs = (float*)alloca((size_t)n * sizeof(float));
     memcpy(coeffs, signal_in, n * sizeof(float));
     
     /* Forward wavelet transform */

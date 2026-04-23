@@ -582,7 +582,7 @@ static inline lg_vec3_t lg_ewald_real_accel(lg_vec3_t r, float q, float alpha) {
     float ar = alpha * r_mag;
     
     /* erfc(alpha*r)/r^2 + 2*alpha*exp(-alpha^2*r^2)/sqrt(pi)/r */
-    float factor = q * (erfcf(ar) / r2 + 2.0f * alpha * expf(-ar * ar) / (sqrtf(M_PI) * r_mag));
+    float factor = q * (erfcf(ar) / r2 + 2.0f * alpha * expf(-ar * ar) / (sqrtf(LG_PI) * r_mag));
     return lg_vec3_scale(lg_vec3_norm(r), factor);
 }
 
@@ -651,7 +651,7 @@ static inline void lg_pm_solve_poisson(lg_particle_mesh_t* pm) {
     int n_total = nx * ny * nz;
     float h = pm->cell_size;
     float h2 = h * h;
-    const float fourpiG = 4.0f * M_PI * 6.67430e-11f;
+    const float fourpiG = 4.0f * LG_PI * 6.67430e-11f;
     
     float omega = 1.5f;
     int max_iter = 2000;

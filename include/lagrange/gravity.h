@@ -103,7 +103,7 @@ static inline double lg_escape_velocity(double mu, double radius) {
 
 /* Compute orbital period (Kepler's 3rd law) */
 static inline double lg_orbital_period(double mu, double semi_major_axis) {
-    return 2.0 * M_PI * sqrt(semi_major_axis * semi_major_axis * semi_major_axis / mu);
+    return 2.0 * LG_PI * sqrt(semi_major_axis * semi_major_axis * semi_major_axis / mu);
 }
 
 /* Mean motion n = sqrt(mu / a³) */
@@ -113,8 +113,8 @@ static inline double lg_mean_motion(double mu, double semi_major_axis) {
 
 /* Mean anomaly M = n * dt, wrapped to [0, 2π) */
 static inline double lg_mean_anomaly(double mean_motion, double dt) {
-    double M = fmod(mean_motion * dt, 2.0 * M_PI);
-    if (M < 0.0) M += 2.0 * M_PI;
+    double M = fmod(mean_motion * dt, 2.0 * LG_PI);
+    if (M < 0.0) M += 2.0 * LG_PI;
     return M;
 }
 
@@ -122,7 +122,7 @@ static inline double lg_mean_anomaly(double mean_motion, double dt) {
 static inline double lg_kepler_solve(double M, double eccentricity, double tol, int max_iter) {
     double E = M;
     if (eccentricity > 0.8) {
-        E = M_PI;
+        E = LG_PI;
     }
     for (int i = 0; i < max_iter; i++) {
         double f = E - eccentricity * sin(E) - M;
@@ -436,19 +436,8 @@ static inline lg_vec3_t lg_orbit_position_from_mean_anomaly(const lg_orbit_t* or
         if (fabsf(dE) < 1e-8f) break;
     }
     
-    /* True anomaly */
-    float sin_E = sinf(E);
-    float cos_E = cosf(E);
-    float beta = orb->e / (1.0f + sqrtf(1.0f - orb->e * orb->e));
-    float sin_nu = sin_E + beta * (sin_E * cos_E * 2.0f - sin_E * (cos_E * cos_E - sin_E * sin_E));
-    float cos_nu = cos_E - beta * (sin_E * sin_E * 2.0f);
-    /* Simplified: nu = 2*atan2(sqrt(1+e)*sin(E/2), sqrt(1-e)*cos(E/2)) */
+    /* True anomaly: nu = 2*atan2(sqrt(1+e)*sin(E/2), sqrt(1-e)*cos(E/2)) */
     float half_E = E * 0.5f;
-    sin_nu = 2.0f * sinf(half_E) * cosf(half_E);
-    cos_nu = cosf(half_E) * cosf(half_E) - sinf(half_E) * sinf(half_E);
-    float denom = 1.0f - orb->e;
-    sin_nu = sqrtf(1.0f + orb->e) * sinf(half_E) * 2.0f;
-    cos_nu = sqrtf(1.0f - orb->e) * cosf(half_E);
     float nu = 2.0f * atan2f(sinf(half_E) * sqrtf(1.0f + orb->e), cosf(half_E) * sqrtf(1.0f - orb->e));
     
     float r = orb->a * (1.0f - orb->e * cosf(E));
@@ -513,7 +502,7 @@ static inline lg_orbital_elements_t lg_state_to_elements(
     double n_mag = sqrt(h.x * h.x + h.y * h.y);
     if (n_mag > 1e-15) {
         elem.raan = atan2(h.x, -h.y);
-        if (elem.raan < 0) elem.raan += 2.0 * M_PI;
+        if (elem.raan < 0) elem.raan += 2.0 * LG_PI;
     }
     
     /* Argument of periapsis and true anomaly */
@@ -523,7 +512,7 @@ static inline lg_orbital_elements_t lg_state_to_elements(
         cos_omega = fmax(-1.0, fmin(1.0, cos_omega));
         elem.arg_of_periapsis = acos(cos_omega);
         if (e_vec.z < 0.0) {
-            elem.arg_of_periapsis = 2.0 * M_PI - elem.arg_of_periapsis;
+            elem.arg_of_periapsis = 2.0 * LG_PI - elem.arg_of_periapsis;
         }
         
         double cos_nu = lg_vec3d_dot(e_vec, r) / 
@@ -531,7 +520,7 @@ static inline lg_orbital_elements_t lg_state_to_elements(
         cos_nu = fmax(-1.0, fmin(1.0, cos_nu));
         elem.true_anomaly = acos(cos_nu);
         if (lg_vec3d_dot(r, v) < 0.0) {
-            elem.true_anomaly = 2.0 * M_PI - elem.true_anomaly;
+            elem.true_anomaly = 2.0 * LG_PI - elem.true_anomaly;
         }
     } else if (n_mag > 1e-15) {
         /* Near-circular orbit: use argument of latitude */
@@ -540,7 +529,7 @@ static inline lg_orbital_elements_t lg_state_to_elements(
         cos_u = fmax(-1.0, fmin(1.0, cos_u));
         elem.true_anomaly = acos(cos_u);
         if (lg_vec3d_dot(r, v) < 0.0) {
-            elem.true_anomaly = 2.0 * M_PI - elem.true_anomaly;
+            elem.true_anomaly = 2.0 * LG_PI - elem.true_anomaly;
         }
     }
     

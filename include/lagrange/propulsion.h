@@ -140,7 +140,7 @@ static inline lg_gravity_assist_t lg_gravity_assist_calculate(
     
     float v_inf_mag = lg_vec3_len(*v_inf_in);
     float ecc = 1.0f + ga.r_periapsis * v_inf_mag * v_inf_mag / planet_mu;
-    ga.bending_angle = M_PI - 2.0f * asinf(1.0f / ecc);
+    ga.bending_angle = LG_PI - 2.0f * asinf(1.0f / ecc);
     
     /* Required turn angle vs available */
     float cos_turn = lg_vec3_dot(lg_vec3_norm(*v_inf_in), lg_vec3_norm(*v_inf_out));
@@ -176,8 +176,8 @@ static inline lg_resonant_return_t lg_resonant_return(
 ) {
     lg_resonant_return_t rr = {0};
     
-    float T_sc = 2.0f * M_PI * sqrtf(a_transfer * a_transfer * a_transfer / mu_central);
-    float T_planet = 2.0f * M_PI * sqrtf(a_planet * a_planet * a_planet / mu_central);
+    float T_sc = 2.0f * LG_PI * sqrtf(a_transfer * a_transfer * a_transfer / mu_central);
+    float T_planet = 2.0f * LG_PI * sqrtf(a_planet * a_planet * a_planet / mu_central);
     
     rr.period_ratio = T_sc / T_planet;
     
@@ -189,7 +189,7 @@ static inline lg_resonant_return_t lg_resonant_return(
                 rr.orbits_planet = m;
                 rr.orbits_sc = n;
                 rr.synodic_period = T_planet * m;
-                rr.phase_change = 2.0f * M_PI * ((float)n / (float)m - 1.0f);
+                rr.phase_change = 2.0f * LG_PI * ((float)n / (float)m - 1.0f);
                 return rr;
             }
         }
@@ -408,8 +408,6 @@ static inline lg_equinoctial_derivs_t lg_equinoctial_gauss(
 ) {
     lg_equinoctial_derivs_t d = {0};
     
-    float r = eq->p / (1.0f + eq->f * cosf(eq->L) + eq->g * sinf(eq->L));
-    float v_tangential = sqrtf(mu / eq->p) * (1.0f + eq->f * cosf(eq->L) + eq->g * sinf(eq->L));
     float n = sqrtf(mu / (eq->p * eq->p * eq->p)) * 
               powf(1.0f + eq->f * cosf(eq->L) + eq->g * sinf(eq->L), 2.0f);
     
@@ -542,7 +540,6 @@ static inline lg_entry_corridor_t lg_entry_corridor(
     
     /* Maximum: too low = entry/descent */
     float q_max = 500.0f; /* W/cm^2 typical heat limit */
-    float v_circ = sqrtf(approach->mu / ((float)atm->body_radius + 100000.0f));
     ec.periapsis_max = H * logf(vehicle->Cd * atm->rho0 * v_entry * v_entry * v_entry / (2.0f * q_max));
     
     ec.feasible = ec.periapsis_min < ec.periapsis_max;
@@ -654,10 +651,9 @@ static inline lg_rotovator_t lg_rotovator_design(
     
     /* Tip touches atmosphere at periapsis */
     float r_peri = planet_radius + atmosphere_height;
-    float v_orbit_peri = sqrtf(2.0f * mu / r_peri); /* Escape velocity at periapsis */
     
     /* Tether length from desired delta-v */
-    r.tether_length = desired_tip_v / (2.0f * M_PI); /* Rough: v = omega * L, omega ~ 2*pi/T */
+    r.tether_length = desired_tip_v / (2.0f * LG_PI); /* Rough: v = omega * L, omega ~ 2*pi/T */
     
     /* Orbit: apoapsis high, periapsis at atmosphere */
     r.e = 0.5f; /* Typical */
@@ -707,8 +703,7 @@ static inline void lg_low_thrust_spiral(
     
     for (int i = 0; i < n_steps; i++) {
         /* Current radius from semi-latus rectum and true longitude */
-        float r = eq->p / (1.0f + eq->f * cosf(eq->L) + eq->g * sinf(eq->L));
-        
+            
         /* Tangential thrust in RTN frame */
         lg_vec3_t accel_rtn = {0.0f, thrust_accel, 0.0f};
         

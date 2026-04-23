@@ -85,18 +85,17 @@ static inline lg_lambert_solution_t lg_lambert_solve(const lg_lambert_problem_t*
     lg_vec3_t r2_hat = lg_vec3_scale(prob->r2, ir2);
     
     /* Cross product for plane normal */
-    lg_vec3_t h_hat = lg_vec3_norm(lg_vec3_cross(r1_hat, r2_hat));
     float dnu = atan2f(lg_vec3_len(lg_vec3_cross(r1_hat, r2_hat)), r1_dot_r2);
-    if (!prob->short_way) dnu = 2.0f*M_PI - dnu;
+    if (!prob->short_way) dnu = 2.0f*LG_PI - dnu;
     
     /* Initial guess for x (universal variable) */
     float A = sqrtf(r1*r2) * sinf(dnu) / sqrtf(1.0f - cosf(dnu)); /* Lambert parameter */
     if (!prob->short_way) A = -A;
     
     float x = 0.0f; /* Initial guess */
-    if (prob->dt * prob->dt < 4.0f * M_PI * M_PI * s * s * s / (27.0f * prob->mu)) {
+    if (prob->dt * prob->dt < 4.0f * LG_PI * LG_PI * s * s * s / (27.0f * prob->mu)) {
         /* Elliptic guess */
-        float alpha = M_PI;
+        float alpha = LG_PI;
         float beta = 2.0f * asinf(sqrtf((s-c)/s));
         x = (alpha - beta) / sqrtf(s);
     }
@@ -108,7 +107,7 @@ static inline lg_lambert_solution_t lg_lambert_solve(const lg_lambert_problem_t*
         float c3 = lg_stumpff_c3(psi);
         
         float y = r1 + r2 + A * (psi * c3 - 1.0f) / sqrtf(c2);
-        if (y < 0 || A > 0 && y < 0) { /* Reject invalid region */
+        if (y < 0 || (A > 0 && y < 0)) { /* Reject invalid region */
             x *= 0.5f;
             continue;
         }
@@ -125,9 +124,6 @@ static inline lg_lambert_solution_t lg_lambert_solve(const lg_lambert_problem_t*
             float f = 1.0f - y/r1;
             float g = A * sqrtf(y / prob->mu);
             float g_dot = 1.0f - y/r2;
-            
-            lg_vec3_t r1_hat_local = lg_vec3_norm(prob->r1);
-            lg_vec3_t r2_hat_local = lg_vec3_norm(prob->r2);
             
             /* Velocity at r1 */
             lg_vec3_t v1_temp = lg_vec3_sub(prob->r2, lg_vec3_scale(prob->r1, f));

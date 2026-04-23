@@ -146,7 +146,7 @@ int test_quat_identity(void) {
 
 int test_quat_rotation(void) {
     /* 90 degree rotation around Z axis */
-    lg_quat_t q = lg_quat_from_axis_angle(lg_vec3(0.0f, 0.0f, 1.0f), (float)M_PI / 2.0f);
+    lg_quat_t q = lg_quat_from_axis_angle(lg_vec3(0.0f, 0.0f, 1.0f), (float)LG_PI / 2.0f);
     
     lg_vec3_t x_axis = lg_vec3(1.0f, 0.0f, 0.0f);
     lg_vec3_t rotated = lg_quat_rotate(q, x_axis);
@@ -275,7 +275,7 @@ int test_mat3_mul_vec3(void) {
 
 int test_quat_slerp_edge_cases(void) {
     lg_quat_t a = lg_quat_from_axis_angle(lg_vec3(0, 0, 1), 0.0f);
-    lg_quat_t b = lg_quat_from_axis_angle(lg_vec3(0, 0, 1), M_PI / 2.0f);
+    lg_quat_t b = lg_quat_from_axis_angle(lg_vec3(0, 0, 1), LG_PI / 2.0f);
     
     /* t=0 should give a */
     lg_quat_t r0 = lg_quat_slerp(a, b, 0.0f);
@@ -289,8 +289,8 @@ int test_quat_slerp_edge_cases(void) {
     
     /* t=0.5 should be 45 degrees */
     lg_quat_t r05 = lg_quat_slerp(a, b, 0.5f);
-    ASSERT_NEAR(r05.w, cosf(M_PI / 8.0f), EPSILON);
-    ASSERT_NEAR(r05.z, sinf(M_PI / 8.0f), EPSILON);
+    ASSERT_NEAR(r05.w, cosf(LG_PI / 8.0f), EPSILON);
+    ASSERT_NEAR(r05.z, sinf(LG_PI / 8.0f), EPSILON);
     
     /* Opposite sign: slerp should take shorter path */
     lg_quat_t b_neg = lg_quat_scale(b, -1.0f);

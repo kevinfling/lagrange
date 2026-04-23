@@ -204,7 +204,7 @@ static inline float lg_ring_toomre_Q(float r, float Omega, float sigma, float su
     const float G = 6.67430e-11f;
     float sound_speed = sigma; /* Velocity dispersion */
     float epicyclic = Omega * sqrtf(1.0f + r / (r + 1e-10f)); /* Approx kappa */
-    return sound_speed * epicyclic / (M_PI * G * surface_density + 1e-30f);
+    return sound_speed * epicyclic / (LG_PI * G * surface_density + 1e-30f);
 }
 
 /* Viscous diffusion timescale: t_nu ~ r^2 / nu */
@@ -230,7 +230,7 @@ static inline float lg_ring_density_wavelength(float r, int m, float Omega, floa
     float D = kappa*kappa - m*m*(Omega - Omega_p)*(Omega - Omega_p);
     if (D < 0) return 1e30f; /* Evanescent */
     const float G = 6.67430e-11f;
-    return 4.0f * M_PI * M_PI * sigma * sigma / (G * r * fabsf(D) + 1e-30f);
+    return 4.0f * LG_PI * LG_PI * sigma * sigma / (G * r * fabsf(D) + 1e-30f);
 }
 
 /*============================================================================
@@ -285,8 +285,8 @@ static inline lg_ring_zone_t* lg_ring_system_add_zone(
     
     /* Compute surface density from optical depth */
     float a_typical = sizes->a_cutoff;
-    float particle_area = M_PI * a_typical * a_typical;
-    float particle_mass = (4.0f/3.0f) * M_PI * a_typical*a_typical*a_typical * sizes->rho_bulk;
+    float particle_area = LG_PI * a_typical * a_typical;
+    float particle_mass = (4.0f/3.0f) * LG_PI * a_typical*a_typical*a_typical * sizes->rho_bulk;
     
     /* tau = n * sigma * H, Sigma = n * m * H */
     z->surface_density = z->tau_normal * particle_mass / particle_area;
@@ -403,7 +403,6 @@ static inline void _lg_ring_particles_ensure(lg_ring_particle_t* p, int n) {
 static inline void lg_ring_zone_populate(lg_ring_zone_t* zone, lg_ring_system_t* rings, int n_particles) {
     float r_mid = (zone->r_inner + zone->r_outer) * 0.5f;
     float dr = (zone->r_outer - zone->r_inner) * 0.5f;
-    float Omega = sqrtf(rings->planet_mass * 6.67430e-11f / (r_mid * r_mid * r_mid));
     const float G = 6.67430e-11f;
     
     lg_ring_particle_t* p = &rings->particles;
@@ -418,11 +417,11 @@ static inline void lg_ring_zone_populate(lg_ring_zone_t* zone, lg_ring_system_t*
         float r = r_mid + (u - 0.5f) * 2.0f * dr;
         
         /* Azimuth */
-        float theta = 2.0f * M_PI * (float)rand() / (float)RAND_MAX;
+        float theta = 2.0f * LG_PI * (float)rand() / (float)RAND_MAX;
         
         /* Vertical: Gaussian distribution */
         float z = zone->scale_height * sqrtf(-2.0f * logf((float)rand() / (float)RAND_MAX + 1e-10f)) *
-                  cosf(2.0f * M_PI * (float)rand() / (float)RAND_MAX);
+                  cosf(2.0f * LG_PI * (float)rand() / (float)RAND_MAX);
         
         /* Keplerian velocity with dispersion */
         float v_kep = sqrtf(rings->planet_mass * G / r);
@@ -443,7 +442,7 @@ static inline void lg_ring_zone_populate(lg_ring_zone_t* zone, lg_ring_system_t*
         float rho = zone->size_dist.rho_bulk * (0.8f + 0.2f * (float)rand() / (float)RAND_MAX);
         p->radius[idx] = a;
         p->internal_density[idx] = rho;
-        p->mass[idx] = (4.0f / 3.0f) * M_PI * a * a * a * rho;
+        p->mass[idx] = (4.0f / 3.0f) * LG_PI * a * a * a * rho;
         p->composition[idx] = (uint32_t)zone->composition;
         p->temperature[idx] = 80.0f; /* Saturn ring temperature (K) */
         p->charge[idx] = 0.0f;
@@ -496,12 +495,11 @@ static inline void lg_ring_self_gravity_wakes(lg_ring_system_t* rings, float dt)
     if (!rings->self_gravity_enabled) return;
     
     /* Critical Toomre wavelength */
-    float lambda_crit = 2.0f * M_PI * M_PI * rings->zones[0].surface_density / 
+    float lambda_crit = 2.0f * LG_PI * LG_PI * rings->zones[0].surface_density / 
         (rings->planet_mass * 6.67430e-11f / 
          powf((rings->zones[0].r_inner + rings->zones[0].r_outer)*0.5f, 3.0f));
     
     /* Wake angle: ~20-25 degrees from azimuthal */
-    float wake_angle = 22.0f * M_PI / 180.0f;
     
     /* Aggregate particles into wake structures when Q < 2 */
     for (int z = 0; z < rings->n_zones; z++) {
@@ -576,7 +574,6 @@ static inline void lg_ring_system_update(lg_ring_system_t* rings, double time, f
         for (int z = 0; z < rings->n_zones; z++) {
             lg_ring_zone_t* zone = &rings->zones[z];
             float r = (zone->r_inner + zone->r_outer) * 0.5f;
-            float Omega = sqrtf(G * rings->planet_mass / (r*r*r));
             float cs = zone->velocity_dispersion;
             float H = zone->scale_height;
             float nu = zone->viscosity_alpha * cs * H; /* Shakura-Sunyaev */
@@ -588,8 +585,8 @@ static inline void lg_ring_system_update(lg_ring_system_t* rings, double time, f
             
             /* Optical depth follows surface density */
             float a_typ = zone->size_dist.a_cutoff;
-            float area = M_PI * a_typ * a_typ;
-            float mass = (4.0f/3.0f) * M_PI * a_typ*a_typ*a_typ * zone->size_dist.rho_bulk;
+            float area = LG_PI * a_typ * a_typ;
+            float mass = (4.0f/3.0f) * LG_PI * a_typ*a_typ*a_typ * zone->size_dist.rho_bulk;
             zone->tau_normal = zone->surface_density * area / mass;
         }
         
@@ -633,8 +630,8 @@ static inline void lg_ring_compute_occultation(lg_ring_system_t* rings, float* t
 static inline float lg_ring_phase_function(float phase_angle, lg_ring_composition_t comp) {
     /* Opposition surge at small phase angles */
     float surge = 1.0f;
-    if (phase_angle < 1.0f * M_PI / 180.0f) {
-        surge = 1.0f + 0.5f / (phase_angle * 180.0f / M_PI + 0.1f);
+    if (phase_angle < 1.0f * LG_PI / 180.0f) {
+        surge = 1.0f + 0.5f / (phase_angle * 180.0f / LG_PI + 0.1f);
     }
     
     /* Lambertian + specular for ice */

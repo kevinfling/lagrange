@@ -515,7 +515,7 @@ static inline void lg_simulation_integrate_node(lg_node_t* node, double substep)
             /* Analytic two-body propagation */
             if (node->type == LG_NODE_BODY) {
                 lg_orbit_t* o = &node->data.body.orbit;
-                o->M = fmodf(o->M + o->n * substep, 2.0f * M_PI);
+                o->M = fmodf(o->M + o->n * substep, 2.0f * LG_PI);
                 /* Update position from mean anomaly */
                 lg_vec3_t r = lg_orbit_position_from_mean_anomaly(o, o->M);
                 node->transform.position = r;
@@ -551,7 +551,6 @@ static inline void lg_simulation_integrate_node(lg_node_t* node, double substep)
 /* Main update: one simulation step */
 static inline void lg_simulation_update(lg_simulation_t* sim, double dt_wall) {
     double sim_dt = dt_wall * sim->time_scale;
-    double target_time = sim->time + sim_dt;
     
     /* Adaptive substepping */
     const double max_substep = 600.0; /* 10 minutes max */

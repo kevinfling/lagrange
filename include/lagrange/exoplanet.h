@@ -89,7 +89,7 @@ static inline float lg_rand_normal(lg_pcg32_t* rng) {
     float u1 = lg_pcg32_uniform(rng);
     float u2 = lg_pcg32_uniform(rng);
     if (u1 < 1e-7f) u1 = 1e-7f;
-    return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * M_PI * u2);
+    return sqrtf(-2.0f * logf(u1)) * cosf(2.0f * LG_PI * u2);
 }
 
 /*============================================================================
@@ -515,8 +515,8 @@ static inline void lg_exo_to_particle_system(const lg_exosystem_t* sys,
         /* Position at periastron or random true anomaly */
         float a = pl->pl_orbsmax * 1.496e11f; /* AU to meters */
         float e = pl->pl_orbeccen;
-        float inc = pl->pl_orbincl * M_PI / 180.0f;
-        float lper = pl->pl_orblper * M_PI / 180.0f;
+        float inc = pl->pl_orbincl * LG_PI / 180.0f;
+        float lper = pl->pl_orblper * LG_PI / 180.0f;
         
         /* Start at periastron for simplicity */
         float r = a * (1.0f - e);

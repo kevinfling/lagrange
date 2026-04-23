@@ -17,6 +17,10 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#ifndef LG_PI
+#define LG_PI 3.14159265358979323846
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -329,7 +333,7 @@ static inline lg_quat_t lg_quat_from_to(lg_vec3_t from, lg_vec3_t to) {
             axis = lg_vec3_cross(a, lg_vec3(0.0f, 1.0f, 0.0f));
         }
         axis = lg_vec3_norm(axis);
-        return lg_quat_from_axis_angle(axis, (float)M_PI);
+        return lg_quat_from_axis_angle(axis, (float)LG_PI);
     }
     
     lg_vec3_t cross = lg_vec3_cross(a, b);

@@ -66,7 +66,7 @@ static inline void lg_fft_radix2(lg_cfloat* buf, int n) {
     /* Butterfly passes */
     for (int s = 1; s <= bits; s++) {
         int m = 1 << s;
-        lg_cfloat wm = cexpf(-I * M_PI / (m >> 1));
+        lg_cfloat wm = cexpf((lg_cfloat)(-I * LG_PI / (m >> 1)));
         for (int k = 0; k < n; k += m) {
             lg_cfloat w = 1.0f;
             for (int j = 0; j < (m >> 1); j++) {
@@ -84,7 +84,7 @@ static inline void lg_fft_radix2(lg_cfloat* buf, int n) {
 static inline void lg_ifft_radix2(lg_cfloat* buf, int n) {
     for (int i = 0; i < n; i++) buf[i] = conjf(buf[i]);
     lg_fft_radix2(buf, n);
-    float scale = 1.0f / n;
+    float scale = 1.0f / (float)n;
     for (int i = 0; i < n; i++) buf[i] = conjf(buf[i]) * scale;
 }
 
@@ -104,7 +104,7 @@ static inline void lg_dct_ii(const float* in, float* out, int n) {
     
     /* Post-twiddle and take real part */
     for (int k = 0; k < n; k++) {
-        lg_cfloat w = cexpf(-I * M_PI * k / (2.0f * n));
+        lg_cfloat w = cexpf((lg_cfloat)(-I * LG_PI * k / (2.0f * (float)n)));
         out[k] = 2.0f * crealf(tmp[k] * w);
     }
 }
@@ -115,14 +115,14 @@ static inline void lg_dct_iii(const float* in, float* out, int n) {
     
     /* Pre-twiddle */
     for (int k = 0; k < n; k++) {
-        lg_cfloat w = cexpf(I * M_PI * k / (2.0f * n));
+        lg_cfloat w = cexpf((lg_cfloat)(I * LG_PI * k / (2.0f * (float)n)));
         tmp[k] = w * in[k];
     }
     
     lg_fft_radix2(tmp, n);
     
     /* Reorder and scale */
-    float scale = 1.0f / n;
+    float scale = 1.0f / (float)n;
     for (int k = 0; k < n/2; k++) {
         out[2*k] = crealf(tmp[k]) * scale;
         out[2*k + 1] = crealf(tmp[n - 1 - k]) * scale;
@@ -183,10 +183,10 @@ static inline void lg_fractional_init(
     fs->index = 0;
     
     /* Allocate ring buffers */
-    fs->vx = (float*)calloc(history_size, sizeof(float));
-    fs->vy = (float*)calloc(history_size, sizeof(float));
-    fs->vz = (float*)calloc(history_size, sizeof(float));
-    fs->kernel = (float*)calloc(history_size, sizeof(float));
+    fs->vx = (float*)calloc((size_t)history_size, sizeof(float));
+    fs->vy = (float*)calloc((size_t)history_size, sizeof(float));
+    fs->vz = (float*)calloc((size_t)history_size, sizeof(float));
+    fs->kernel = (float*)calloc((size_t)history_size, sizeof(float));
     
     /* Precompute Gamma(alpha+1) using lgammaf for log-gamma */
     fs->gamma_alpha_1 = expf(lgammaf(alpha + 1.0f));
@@ -204,7 +204,7 @@ static inline void lg_fractional_init(
     
     /* Allocate DCT workspace only if using fast path (size > 256) */
     if (history_size > 256) {
-        fs->dct_buf = (float*)calloc(history_size * 4, sizeof(float));
+        fs->dct_buf = (float*)calloc((size_t)history_size * 4, sizeof(float));
     }
 }
 
@@ -301,6 +301,7 @@ static inline lg_vec3_t lg_fractional_integral_fast(lg_fractional_t* fs) {
  * For 0<alpha<1, this is approximated by the fractional integral of order (1-alpha) 
  * or directly using the predictor-corrector. Here we use the integral formulation. */
 static inline lg_vec3_t lg_fractional_drag(lg_fractional_t* fs, const lg_body_t* body) {
+    (void)body;
     /* For alpha < 1, we compute the Caputo derivative via the integral */
     /* D^alpha v(t) approx = 1/Gamma(1-alpha) * integral_0^t (t-s)^{-alpha} v'(s) ds */
     /* But we store v, not v', so we use the integral of v (order alpha) and differentiate,
@@ -492,6 +493,7 @@ static inline lg_vec3_t lg_yarkovsky_force(
     float thermal_inertia_alpha,  /* Fractional order 0.3-0.7 */
     float emissivity
 ) {
+    (void)thermal_inertia_alpha;
     /* Sun direction */
     lg_vec3_t r_sun = lg_vec3_sub(*sun_pos, xform->position);
     float dist_au = lg_vec3_len(r_sun) / 1.496e11f;  /* Normalize to AU */

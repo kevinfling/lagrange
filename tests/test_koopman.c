@@ -61,8 +61,8 @@ int test_koopman_observable(void) {
     float complex psi6 = lg_koop_observable_dct(&pos, &vel, omega, 6);
     ASSERT_NEAR(cabsf(psi6), 1.0f, EPSILON);
     float phase6 = cargf(psi6);
-    while (phase6 > 1.0f + M_PI) phase6 -= 2.0f * M_PI;
-    while (phase6 < 1.0f - M_PI) phase6 += 2.0f * M_PI;
+    while (phase6 > 1.0f + LG_PI) phase6 -= 2.0f * LG_PI;
+    while (phase6 < 1.0f - LG_PI) phase6 += 2.0f * LG_PI;
     ASSERT_NEAR(phase6, 1.0f, EPSILON); /* phase = omega * pos->x */
     
     printf("PASS: koopman_observable\n");
@@ -200,8 +200,8 @@ int test_koopman_cheap_init(void) {
     ASSERT_NEAR(km.hurst, 0.3f, EPSILON);
     
     /* Frequencies should follow DCT-II grid */
-    ASSERT_NEAR(km.frequencies[0], M_PI * 0.5f / 16.0f, EPSILON);
-    ASSERT_NEAR(km.frequencies[15], M_PI * 15.5f / 16.0f, EPSILON);
+    ASSERT_NEAR(km.frequencies[0], LG_PI * 0.5f / 16.0f, EPSILON);
+    ASSERT_NEAR(km.frequencies[15], LG_PI * 15.5f / 16.0f, EPSILON);
     
     free(km.frequencies);
     free(km.scales);

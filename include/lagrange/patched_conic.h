@@ -265,7 +265,7 @@ static inline lg_porkchop_ephem_point_t* lg_porkchop_ephem_generate(
                 /* C3 = |v1 - v_earth|^2 */
                 lg_vec3_t dv = lg_vec3_sub(sol.v1, v1);
                 grid[idx].c3 = lg_vec3_len_sq(dv);
-                grid[idx].declination = asinf(dv.y / lg_vec3_len(dv)) * 180.0f/M_PI;
+                grid[idx].declination = asinf(dv.y / lg_vec3_len(dv)) * 180.0f/LG_PI;
                 
                 /* Arrival v_inf */
                 lg_vec3_t dv_arr = lg_vec3_sub(sol.v2, v2);

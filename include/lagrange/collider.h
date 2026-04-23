@@ -115,7 +115,7 @@ static inline float lg_collider_volume(const lg_collider_t* c) {
     switch (c->type) {
         case LG_SHAPE_SPHERE: {
             float r = c->sphere.radius;
-            return (4.0f / 3.0f) * (float)M_PI * r * r * r;
+            return (4.0f / 3.0f) * (float)LG_PI * r * r * r;
         }
         case LG_SHAPE_BOX: {
             lg_vec3_t h = c->box.half_extents;
@@ -124,14 +124,14 @@ static inline float lg_collider_volume(const lg_collider_t* c) {
         case LG_SHAPE_CAPSULE: {
             float r = c->capsule.radius;
             float hh = c->capsule.half_height;
-            float sphere_part = (4.0f / 3.0f) * (float)M_PI * r * r * r;
-            float cylinder_part = (float)M_PI * r * r * (2.0f * hh);
+            float sphere_part = (4.0f / 3.0f) * (float)LG_PI * r * r * r;
+            float cylinder_part = (float)LG_PI * r * r * (2.0f * hh);
             return sphere_part + cylinder_part;
         }
         case LG_SHAPE_CYLINDER: {
             float r = c->cylinder.radius;
             float hh = c->cylinder.half_height;
-            return (float)M_PI * r * r * (2.0f * hh);
+            return (float)LG_PI * r * r * (2.0f * hh);
         }
         case LG_SHAPE_PLANE:
             return 0.0f; /* Infinite */

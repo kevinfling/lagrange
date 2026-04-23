@@ -264,7 +264,7 @@ static inline void lg_geodesic_step_rk4(lg_geodesic_t* geo,
     }
     
     /* Enforce equatorial plane */
-    geo->x[2] = M_PI / 2.0f;
+    geo->x[2] = LG_PI / 2.0f;
     geo->v[2] = 0.0f;
 }
 
@@ -274,7 +274,7 @@ static inline float lg_schwarzschild_precession(const lg_schwarzschild_t* bh,
                                                float semi_major_axis,
                                                float eccentricity) {
     float p = semi_major_axis * (1.0f - eccentricity * eccentricity);
-    return 6.0f * M_PI * bh->M / p; /* radians per orbit */
+    return 6.0f * LG_PI * bh->M / p; /* radians per orbit */
 }
 
 /*============================================================================
@@ -353,7 +353,7 @@ static inline bool lg_trace_ray_schwarzschild(lg_ray_t* ray,
     /* Outgoing (v_r > 0) → u decreases with φ → w < 0 */
     
     float phi = 0.0f;
-    float dphi = (2.0f * M_PI) / steps;
+    float dphi = (2.0f * LG_PI) / steps;
     float dist_traced = 0.0f;
     bool ingoing = (w > 0.0f);
     
@@ -475,7 +475,7 @@ static inline void lg_disk_spectrum(const lg_accretion_disk_t* disk,
             float B = (2.0f * 6.626e-34f * nu*nu*nu / (LG_C*LG_C)) / (expf(x) - 1.0f);
             
             /* Area element 2*pi*r*dr */
-            total += B * 2.0f * M_PI * r * (r * 0.1f); /* logarithmic dr */
+            total += B * 2.0f * LG_PI * r * (r * 0.1f); /* logarithmic dr */
         }
         flux[i] = total;
     }
@@ -512,7 +512,7 @@ static inline float lg_chirp_mass(float m1, float m2) {
 static inline float lg_gw_frequency(float M_chirp_geom, float t_to_coalescence) {
     /* t_c - t in geometric units */
     float factor = 5.0f / 256.0f * powf(M_chirp_geom, -5.0f/3.0f);
-    return powf(factor / t_to_coalescence, 3.0f/8.0f) / M_PI;
+    return powf(factor / t_to_coalescence, 3.0f/8.0f) / LG_PI;
 }
 
 /* Strain amplitude (characteristic) */
@@ -641,7 +641,7 @@ static inline void lg_redshift_batch_avx2(const lg_schwarzschild_t* bh,
 static inline float lg_hawking_temperature(float M_kg) {
     const float hbar = 1.054571817e-34f;
     const float kB = 1.380649e-23f;
-    return hbar * LG_C*LG_C*LG_C / (8.0f * M_PI * LG_G * M_kg * kB);
+    return hbar * LG_C*LG_C*LG_C / (8.0f * LG_PI * LG_G * M_kg * kB);
 }
 
 /* Mass evolution with fractional memory (non-Markovian evaporation)

@@ -195,7 +195,7 @@ int test_wavelet_detect_maneuver(void) {
 int test_wavelet_morlet(void) {
     float signal[32];
     for (int i = 0; i < 32; i++) {
-        signal[i] = sinf(2.0f * M_PI * 0.1f * i); /* 10% of Nyquist */
+        signal[i] = sinf(2.0f * LG_PI * 0.1f * i); /* 10% of Nyquist */
     }
     
     float out_real[32] = {0};

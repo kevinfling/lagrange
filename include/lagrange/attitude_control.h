@@ -100,7 +100,7 @@ static inline lg_reaction_wheel_t lg_rw_init(lg_vec3_t axis_body, float J, float
     rw.J = J;
     rw.omega = 0.0f;
     rw.h = 0.0f;
-    rw.max_omega = max_rpm * 2.0f * M_PI / 60.0f;
+    rw.max_omega = max_rpm * 2.0f * LG_PI / 60.0f;
     rw.max_torque = 0.1f; /* Default 0.1 Nm */
     rw.h_command = 0.0f;
     rw.tau_command = 0.0f;
@@ -170,11 +170,11 @@ static inline lg_rw_array_t lg_rw_array_pyramid(void) {
     lg_rw_array_t arr;
     arr.n_wheels = 4;
     
-    float angle = 45.0f * M_PI / 180.0f;
+    float angle = 45.0f * LG_PI / 180.0f;
     float base_angles[4] = {45, 135, 225, 315}; /* deg */
     
     for (int i = 0; i < 4; i++) {
-        float phi = base_angles[i] * M_PI / 180.0f;
+        float phi = base_angles[i] * LG_PI / 180.0f;
         lg_vec3_t axis = {
             sinf(angle) * cosf(phi),
             sinf(angle) * sinf(phi),
@@ -274,7 +274,7 @@ static inline void lg_rw_array_desaturate(lg_rw_array_t* arr,
                                          float strength) {
     /* Apply external torque opposite to net wheel momentum */
     lg_vec3_t h_net = lg_rw_array_momentum(arr);
-    lg_vec3_t desat_dir = lg_vec3_norm(h_net);
+    (void)h_net;
     
     /* Command would mix with attitude control... simplified here */
 }
@@ -313,8 +313,8 @@ static inline lg_cmg_t lg_cmg_init(lg_vec3_t initial_spin_axis,
     cmg.h = momentum;
     cmg.gimbal_angle = 0.0f;
     cmg.gimbal_rate = 0.0f;
-    cmg.max_gimbal_rate = max_rate_deg_s * M_PI / 180.0f;
-    cmg.max_gimbal_angle = M_PI / 2.0f; /* +/- 90 deg */
+    cmg.max_gimbal_rate = max_rate_deg_s * LG_PI / 180.0f;
+    cmg.max_gimbal_angle = LG_PI / 2.0f; /* +/- 90 deg */
     cmg.gimbal_rate_cmd = 0.0f;
     cmg.singular = false;
     return cmg;
@@ -324,7 +324,7 @@ static inline lg_cmg_t lg_cmg_init(lg_vec3_t initial_spin_axis,
 static inline lg_cmg_t lg_cmg_high_power(lg_vec3_t spin, lg_vec3_t gimbal) {
     /* J = 0.5 * m * r^2 for disk, omega = 5000*2pi/60 */
     float J = 0.5f * 100.0f * 1.0f; /* 50 kg*m^2 */
-    float omega = 5000.0f * 2.0f * M_PI / 60.0f;
+    float omega = 5000.0f * 2.0f * LG_PI / 60.0f;
     return lg_cmg_init(spin, gimbal, J * omega, 10.0f); /* 10 deg/s gimbal */
 }
 
@@ -394,10 +394,10 @@ static inline lg_cmg_array_t lg_cmg_array_iss_like(void) {
     lg_cmg_array_t arr;
     arr.n_cmgs = 4;
     
-    float beta = 54.75f * M_PI / 180.0f; /* Skew angle */
+    float beta = 54.75f * LG_PI / 180.0f; /* Skew angle */
     
     for (int i = 0; i < 4; i++) {
-        float angle = i * M_PI / 2.0f;
+        float angle = i * LG_PI / 2.0f;
         lg_vec3_t spin = {
             cosf(beta) * sinf(angle),
             cosf(beta) * cosf(angle),
@@ -615,7 +615,7 @@ static inline lg_precession_state_t lg_precession_init(float I_axial, float I_tr
 /* omega_dot_y = (I_axial - I_trans)/I_trans * omega_x * omega_z */
 /* omega_dot_z = 0 */
 static inline void lg_precession_step(lg_precession_state_t* p, float dt) {
-    float k = (p->I_transverse - p->I_axial) / p->I_transverse;
+    (void)p; /* float k = (p->I_transverse - p->I_axial) / p->I_transverse; */
     
     /* Exact solution for constant precession rate */
     float omega_p = p->omega_body.z * (p->I_axial - p->I_transverse) / p->I_transverse;

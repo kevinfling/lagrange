@@ -92,17 +92,17 @@ static inline lg_transfer_solution_t lg_transfer_hohmann(float mu,
         sol.target.semi_major_axis = r2;
         sol.transfer.semi_major_axis = a_xfer;
         sol.transfer.eccentricity = e_xfer;
-        sol.transfer.arg_of_periapsis = M_PI;  /* Departure at apoapsis */
+        sol.transfer.arg_of_periapsis = LG_PI;  /* Departure at apoapsis */
     }
     
     sol.dv_total = fabsf(sol.dv_departure) + fabsf(sol.dv_arrival);
     
     /* Time of flight: half period of transfer ellipse */
-    sol.tof = M_PI * sqrtf(a_xfer * a_xfer * a_xfer / mu);
+    sol.tof = LG_PI * sqrtf(a_xfer * a_xfer * a_xfer / mu);
     
     /* Phase angle for rendezvous: target must be pi*(1 - sqrt((1+e)/8)) behind */
     /* For circular Hohmann: lead angle = pi * (1 - 1/sqrt(8)) ≈ 1.72 rad ≈ 98.6 deg */
-    sol.phase_angle = M_PI * (1.0f - sqrtf(powf(2.0f*r1/(r1+r2), 3.0f)));
+    sol.phase_angle = LG_PI * (1.0f - sqrtf(powf(2.0f*r1/(r1+r2), 3.0f)));
     
     sol.efficiency = 1.0f;  /* By definition, optimal for 2-impulse circular */
     
@@ -188,7 +188,7 @@ static inline lg_transfer_solution_t lg_transfer_bielliptic(float mu,
     sol.dv_total = dv1 + dv2 + dv3;
     
     /* TOF: half period of first ellipse + half period of second ellipse */
-    sol.tof = M_PI * (sqrtf(a_xfer1*a_xfer1*a_xfer1/mu) + sqrtf(a_xfer2*a_xfer2*a_xfer2/mu));
+    sol.tof = LG_PI * (sqrtf(a_xfer1*a_xfer1*a_xfer1/mu) + sqrtf(a_xfer2*a_xfer2*a_xfer2/mu));
     
     return sol;
 }
@@ -235,7 +235,7 @@ static inline lg_transfer_solution_t lg_transfer_generalized(float mu,
         float a1 = initial->semi_major_axis;
         float a2 = target->semi_major_axis;
         float a_xfer = (a1 + a2) * 0.5f;
-        tof_hint = M_PI * sqrtf(a_xfer*a_xfer*a_xfer/mu);
+        tof_hint = LG_PI * sqrtf(a_xfer*a_xfer*a_xfer/mu);
     }
     
     lg_lambert_problem_t prob = {
@@ -273,10 +273,10 @@ static inline float lg_transfer_phase_wait(float mu, float r1, float r2,
     
     /* Current angular separation */
     float n_target = target_mean_motion;
-    float n_transfer = M_PI / hohm.tof;  /* Mean motion of transfer (half period = pi) */
+    float n_transfer = LG_PI / hohm.tof;  /* Mean motion of transfer (half period = pi) */
     
     /* Synodic period */
-    float synodic = 2.0f * M_PI / fabsf(n_transfer - n_target);
+    float synodic = 2.0f * LG_PI / fabsf(n_transfer - n_target);
     
     /* Wait time to achieve lead_angle separation */
     float wait = lead_angle / fabsf(n_target - n_transfer);

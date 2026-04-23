@@ -392,7 +392,7 @@ static inline lg_halo_orbit_t lg_halo_approximation(const lg_cr3bp_t* cr3,
     
     /* Generate samples */
     for (int i = 0; i < n_samples; i++) {
-        float t = 2.0f * M_PI * i / n_samples;
+        float t = 2.0f * LG_PI * i / n_samples;
         float tau = halo.omega * t;
         
         /* Richardson expansion (simplified first-order) */

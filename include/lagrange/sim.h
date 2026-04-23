@@ -597,7 +597,7 @@ static inline void lg_broad_phase(lg_world_t* world, lg_contact_t* contacts, int
             else if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_PLANE) {
                 collided = lg_collide_sphere_plane(
                     ta->position, ca->sphere.radius + ca->margin,
-                    tb->rotation.x == 0 && tb->rotation.z == 0 ? 
+                    fabsf(tb->rotation.x) < 1e-6f && fabsf(tb->rotation.z) < 1e-6f ? 
                         lg_vec3(0, 1, 0) : lg_quat_rotate(tb->rotation, lg_vec3_up()),
                     cb->plane.distance,
                     &contact
@@ -607,7 +607,7 @@ static inline void lg_broad_phase(lg_world_t* world, lg_contact_t* contacts, int
             else if (ca->type == LG_SHAPE_PLANE && cb->type == LG_SHAPE_SPHERE) {
                 collided = lg_collide_sphere_plane(
                     tb->position, cb->sphere.radius + cb->margin,
-                    ta->rotation.x == 0 && ta->rotation.z == 0 ? 
+                    fabsf(ta->rotation.x) < 1e-6f && fabsf(ta->rotation.z) < 1e-6f ? 
                         lg_vec3(0, 1, 0) : lg_quat_rotate(ta->rotation, lg_vec3_up()),
                     ca->plane.distance,
                     &contact

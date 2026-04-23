@@ -207,10 +207,10 @@ int test_mean_motion_anomaly(void) {
     double a = 7e6;
     double n = lg_mean_motion(LG_MU_EARTH, a);
     double T = lg_orbital_period(LG_MU_EARTH, a);
-    ASSERT_NEAR_D(n, 2.0 * M_PI / T, 1e-10);
+    ASSERT_NEAR_D(n, 2.0 * LG_PI / T, 1e-10);
     
     double M = lg_mean_anomaly(n, T / 4.0);
-    ASSERT_NEAR_D(M, M_PI / 2.0, 1e-10);
+    ASSERT_NEAR_D(M, LG_PI / 2.0, 1e-10);
     
     printf("PASS: mean_motion_anomaly\n");
     return 0;
@@ -223,11 +223,11 @@ int test_mean_motion_anomaly(void) {
 int test_flight_path_angle(void) {
     /* Circular orbit: flight path angle = 0 everywhere */
     ASSERT_NEAR_D(lg_flight_path_angle(0.0, 0.0), 0.0, 1e-12);
-    ASSERT_NEAR_D(lg_flight_path_angle(0.0, M_PI / 2.0), 0.0, 1e-12);
+    ASSERT_NEAR_D(lg_flight_path_angle(0.0, LG_PI / 2.0), 0.0, 1e-12);
     
     /* Elliptical orbit: max flight path angle at ν where tan(γ) = e*sin(ν)/(1+e*cos(ν)) */
     double e = 0.5;
-    double gamma = lg_flight_path_angle(e, M_PI / 2.0);
+    double gamma = lg_flight_path_angle(e, LG_PI / 2.0);
     ASSERT_NEAR_D(gamma, atan2(e, 1.0), 1e-12);
     
     printf("PASS: flight_path_angle\n");
@@ -276,7 +276,7 @@ int test_gauss_orbit_determination(void) {
     double a = 7e6;
     double v_circ = sqrt(mu / a);
     double n_sat = sqrt(mu / (a*a*a));
-    double inc_sat = 30.0 * M_PI / 180.0;
+    double inc_sat = 30.0 * LG_PI / 180.0;
     double raan_sat = 0.0;
     double arg_lat0 = -0.5;
     
