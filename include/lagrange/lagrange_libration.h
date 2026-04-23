@@ -269,10 +269,22 @@ static inline lg_libration_stability_t lg_libration_stability(const lg_cr3bp_t* 
             float c = sqrtf(1.0f - 27.0f*mu*mu1/4.0f);
             stab.frequency = sqrtf(0.5f * (1.0f - sqrtf(1.0f - 27.0f*mu*mu1)));
         }
+    } else {
+        /* L1/L2/L3: compute planar center frequency from characteristic polynomial */
+        /* lambda^4 + (4 - Uxx - Uyy)*lambda^2 + Uxx*Uyy = 0 (Uxy = 0 at collinear points) */
+        float b = 4.0f - Uxx - Uyy;
+        float disc = b*b - 4.0f*Uxx*Uyy;
+        if (disc > 0.0f) {
+            float sqrt_disc = sqrtf(disc);
+            float s1 = (-b + sqrt_disc) * 0.5f;
+            float s2 = (-b - sqrt_disc) * 0.5f;
+            /* One root positive (saddle), one negative (center) */
+            float s_neg = (s1 < 0.0f) ? s1 : s2;
+            if (s_neg < 0.0f) {
+                stab.frequency = sqrtf(-s_neg);
+            }
+        }
     }
-    
-    /* Eigenvalue calculation (simplified: use characteristic polynomial for planar part) */
-    /* For L1/L2/L3: saddle x center x center (unstable, but bounded oscillations in y,z) */
     
     return stab;
 }
@@ -355,22 +367,28 @@ static inline lg_halo_orbit_t lg_halo_approximation(const lg_cr3bp_t* cr3,
     halo.Az = Az;
     halo.n_samples = n_samples;
     
-    /* Get linearized frequency from stability analysis */
+    /* Get linearized frequencies from stability analysis */
     lg_libration_stability_t stab = lg_libration_stability(cr3, L, point_idx);
-    float wn = stab.frequency; /* ~1.0 for small mu */
+    float wn = stab.frequency;
+    if (wn < 1e-6f || !isfinite(wn)) wn = 1.0f;
     
-    /* Third-order corrections (simplified) */
-    /* For northern halo (Az > 0): */
-    float c2 = 4.0f; /* Approximation for L1/L2 */
-    float lambda = sqrtf(c2/2.0f + sqrtf(c2*c2/4.0f - stab.A[3][4]*stab.A[4][3])); /* Simplified */
+    /* Vertical frequency from out-of-plane equation: z'' = Uzz*z */
+    float wz = sqrtf(-stab.A[5][2]);
+    if (wz < 1e-6f || !isfinite(wz)) wz = wn;
     
-    /* Amplitude relationships: Ay = k*Ax, Ax related to Az via nonlinearity */
-    float k = (lambda*lambda - stab.A[3][0]) / stab.A[3][1]; /* From eigenvector */
-    halo.Ax = Az / 2.0f; /* Rough approximation */
+    /* Halo orbit frequency (1:1 resonance between planar and vertical) */
+    halo.omega = wz;
+    
+    /* In-plane amplitude ratio from linearized CR3BP at frequency omega */
+    /* k = Ay/Ax = 2*omega / (omega^2 + Uyy) */
+    float k = 2.0f * wz / (wz*wz + stab.A[4][1]);
+    if (!isfinite(k)) {
+        k = -(wz*wz + stab.A[3][0]) / (2.0f * wz);
+    }
+    
+    /* First-order approximation: Ax ~ Az/2 for L1/L2 halo family */
+    halo.Ax = Az / 2.0f;
     halo.Ay = k * halo.Ax;
-    
-    /* Frequency correction */
-    halo.omega = wn * (1.0f + 0.1f*Az*Az); /* Small correction */
     
     /* Generate samples */
     for (int i = 0; i < n_samples; i++) {
@@ -402,15 +420,34 @@ static inline void lg_stm_reset_identity(lg_stm_t* stm) {
     for (int i = 0; i < 6; i++) stm->phi[i][i] = 1.0f;
 }
 
-/* STM evolution step (simplified, using matrix exponential approximation) */
+/* STM evolution step: second-order Taylor approximation of matrix exponential */
 static inline void lg_stm_step(lg_stm_t* stm, const lg_libration_stability_t* A, float dt) {
-    /* Phi_new = (I + A*dt) * Phi for small dt */
+    /* exp(A*dt) ≈ I + A*dt + 0.5*(A*dt)^2 */
+    float B[6][6];
+    for (int i = 0; i < 6; i++) {
+        for (int j = 0; j < 6; j++) {
+            B[i][j] = A->A[i][j] * dt;
+        }
+    }
+    
+    /* C = 0.5 * B * B */
+    float C[6][6];
+    for (int i = 0; i < 6; i++) {
+        for (int j = 0; j < 6; j++) {
+            C[i][j] = 0.0f;
+            for (int k = 0; k < 6; k++) {
+                C[i][j] += 0.5f * B[i][k] * B[k][j];
+            }
+        }
+    }
+    
+    /* temp = (I + B + C) * Phi */
     float temp[6][6];
     for (int i = 0; i < 6; i++) {
         for (int j = 0; j < 6; j++) {
             temp[i][j] = stm->phi[i][j];
             for (int k = 0; k < 6; k++) {
-                temp[i][j] += A->A[i][k] * stm->phi[k][j] * dt;
+                temp[i][j] += (B[i][k] + C[i][k]) * stm->phi[k][j];
             }
         }
     }

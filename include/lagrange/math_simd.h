@@ -45,17 +45,24 @@ typedef struct {
 
 /* Reciprocal square root: rsqrt(x) with 2 Newton iterations */
 static inline float lg_rsqrt_fast(float x) {
-    #ifdef LG_SIMD_AVX2
-        /* Use hardware rsqrt with refinement */
-        __m128 vx = _mm_set_ss(x);
-        __m128 vr = _mm_rsqrt14_ss(vx, vx);  /* AVX-512VL, fallback below */
-        /* For pure AVX2, use scalar Newton on bit-hack */
-    #endif
+    float y;
     
-    /* Portable bit-level initial guess (magic number) */
-    union { float f; int32_t i; } u = {x};
-    u.i = 0x5f3759df - (u.i >> 1);  /* Quake III fast rsqrt */
-    float y = u.f;
+    #if defined(__AVX512VL__)
+        /* AVX-512VL provides 14-bit accurate rsqrt */
+        __m128 vx = _mm_set_ss(x);
+        __m128 vr = _mm_rsqrt14_ss(vx, vx);
+        y = _mm_cvtss_f32(vr);
+    #elif defined(__SSE__)
+        /* SSE provides ~12-bit accurate rsqrt */
+        __m128 vx = _mm_set_ss(x);
+        __m128 vr = _mm_rsqrt_ss(vx, vx);
+        y = _mm_cvtss_f32(vr);
+    #else
+        /* Portable bit-level initial guess (magic number) */
+        union { float f; int32_t i; } u = {x};
+        u.i = 0x5f3759df - (u.i >> 1);  /* Quake III fast rsqrt */
+        y = u.f;
+    #endif
     
     /* Newton-Raphson: y = y * (1.5f - 0.5f * x * y * y) */
     float xh = 0.5f * x;

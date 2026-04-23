@@ -160,21 +160,112 @@ typedef struct {
 } lg_geodesic_t;
 
 /* Christoffel symbols for Schwarzschild (simplified for equatorial theta=pi/2) */
-static inline void lg_schwarzschild_christoffel(float Gamma[4][4][4], float r) {
+static inline void lg_schwarzschild_christoffel(float Gamma[4][4][4], float M, float r) {
     memset(Gamma, 0, 4*4*4*sizeof(float));
-    /* Fill non-zero components for equatorial plane */
-    /* Gamma^t_tr = M/(r(r-2M)) etc. - explicit calculation */
+    
+    if (r <= 2.0f * M) return; /* Inside horizon, undefined */
+    
+    float r_minus_2M = r - 2.0f * M;
+    float r2 = r * r;
+    float r3 = r2 * r;
+    
+    /* Gamma^t_tr = Gamma^t_rt = M / (r(r-2M)) */
+    Gamma[0][0][1] = Gamma[0][1][0] = M / (r * r_minus_2M);
+    
+    /* Gamma^r_tt = M(r-2M)/r^3 */
+    Gamma[1][0][0] = M * r_minus_2M / r3;
+    
+    /* Gamma^r_rr = -M/(r(r-2M)) */
+    Gamma[1][1][1] = -M / (r * r_minus_2M);
+    
+    /* Gamma^r_thth = -(r-2M) */
+    Gamma[1][2][2] = -(r - 2.0f * M);
+    
+    /* Gamma^r_phph = -(r-2M) (sin^2(theta)=1 in equatorial plane) */
+    Gamma[1][3][3] = -(r - 2.0f * M);
+    
+    /* Gamma^th_rth = Gamma^th_thr = 1/r */
+    Gamma[2][1][2] = Gamma[2][2][1] = 1.0f / r;
+    
+    /* Gamma^ph_rph = Gamma^ph_phr = 1/r */
+    Gamma[3][1][3] = Gamma[3][3][1] = 1.0f / r;
 }
 
-/* RK4 integration of geodesic equation:
- * d^2x^mu/dtau^2 = -Gamma^mu_nu_sigma * v^nu * v^sigma */
+/* Radial acceleration for equatorial Schwarzschild geodesic */
+static inline float _lg_radial_accel(float r, float M, float L) {
+    float r2 = r * r;
+    float r3 = r2 * r;
+    float r4 = r3 * r;
+    return -M / r2 + L * L / r3 - 3.0f * M * L * L / r4;
+}
+
+/* RK4 integration of geodesic equation (equatorial plane, effective potential) */
 static inline void lg_geodesic_step_rk4(lg_geodesic_t* geo, 
                                         const lg_schwarzschild_t* bh,
                                         float dtau) {
-    /* Standard RK4 for 2nd order ODE system */
-    /* Evaluate k1, k2, k3, k4 for Christoffel terms */
+    float M = bh->M;
+    float rs = bh->rs;
     
-    /* Simplified: use effective potential method for equatorial orbits instead */
+    float r = geo->x[1];
+    float vr = geo->v[1];
+    float phi = geo->x[3];
+    
+    if (r <= rs * 1.001f) return; /* Near horizon, freeze */
+    
+    /* Conserved quantities */
+    float L = r * r * geo->v[3];
+    float E = (1.0f - rs / r) * geo->v[0];
+    
+    /* k1 */
+    float k1_r = vr;
+    float k1_vr = _lg_radial_accel(r, M, L);
+    float k1_phi = L / (r * r);
+    float k1_t = E / (1.0f - rs / r);
+    
+    /* k2 */
+    float r2 = r + 0.5f * dtau * k1_r;
+    float vr2 = vr + 0.5f * dtau * k1_vr;
+    if (r2 <= rs) r2 = rs * 1.001f;
+    float k2_r = vr2;
+    float k2_vr = _lg_radial_accel(r2, M, L);
+    float k2_phi = L / (r2 * r2);
+    float k2_t = E / (1.0f - rs / r2);
+    
+    /* k3 */
+    float r3 = r + 0.5f * dtau * k2_r;
+    float vr3 = vr + 0.5f * dtau * k2_vr;
+    if (r3 <= rs) r3 = rs * 1.001f;
+    float k3_r = vr3;
+    float k3_vr = _lg_radial_accel(r3, M, L);
+    float k3_phi = L / (r3 * r3);
+    float k3_t = E / (1.0f - rs / r3);
+    
+    /* k4 */
+    float r4 = r + dtau * k3_r;
+    float vr4 = vr + dtau * k3_vr;
+    if (r4 <= rs) r4 = rs * 1.001f;
+    float k4_r = vr4;
+    float k4_vr = _lg_radial_accel(r4, M, L);
+    float k4_phi = L / (r4 * r4);
+    float k4_t = E / (1.0f - rs / r4);
+    
+    /* Update */
+    float h6 = dtau / 6.0f;
+    geo->x[1] = r  + h6 * (k1_r  + 2.0f*k2_r  + 2.0f*k3_r  + k4_r);
+    geo->v[1] = vr + h6 * (k1_vr + 2.0f*k2_vr + 2.0f*k3_vr + k4_vr);
+    geo->x[3] = phi + h6 * (k1_phi + 2.0f*k2_phi + 2.0f*k3_phi + k4_phi);
+    geo->x[0] = geo->x[0] + h6 * (k1_t + 2.0f*k2_t + 2.0f*k3_t + k4_t);
+    
+    /* Recompute velocities to maintain consistency with conserved quantities */
+    float r_new = geo->x[1];
+    if (r_new > rs) {
+        geo->v[0] = E / (1.0f - rs / r_new);
+        geo->v[3] = L / (r_new * r_new);
+    }
+    
+    /* Enforce equatorial plane */
+    geo->x[2] = M_PI / 2.0f;
+    geo->v[2] = 0.0f;
 }
 
 /* Relativistic precession per orbit 

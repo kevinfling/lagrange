@@ -670,6 +670,29 @@ static inline void lg_integrate_gyroscopic(lg_body_t* body,
 }
 
 /*============================================================================
+ * Gravity Gradient Torque
+ * Torque on a spacecraft with principal inertia I due to gravity gradient.
+ * tau = (3*mu / |r|^5) * r x (I * r)
+ *===========================================================================*/
+static inline lg_vec3_t lg_gravity_gradient_torque(lg_vec3_t r,
+                                                    lg_vec3_t inertia,
+                                                    float mu) {
+    float r2 = lg_vec3_len_sq(r);
+    float r5 = r2 * r2 * sqrtf(r2);
+    if (r5 < 1e-12f) return lg_vec3_zero();
+    
+    /* I * r for diagonal inertia tensor */
+    lg_vec3_t Ir = {
+        inertia.x * r.x,
+        inertia.y * r.y,
+        inertia.z * r.z
+    };
+    
+    float factor = 3.0f * mu / r5;
+    return lg_vec3_scale(lg_vec3_cross(r, Ir), factor);
+}
+
+/*============================================================================
  * Momentum Management (keeping total H within envelope)
  *===========================================================================*/
 static inline void lg_momentum_manage(lg_rw_array_t* rws,

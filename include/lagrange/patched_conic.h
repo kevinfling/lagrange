@@ -163,16 +163,28 @@ static inline void lg_ephem_state(const lg_planet_ephemeris_t* ephem,
                                  lg_vec3_t* pos,
                                  lg_vec3_t* vel) {
     float dt = (jd - ephem->epoch_jd) * 86400.0f; /* Seconds */
-    /* Propagate mean anomaly */
     float n = sqrtf(ephem->mu / (ephem->elements.semi_major_axis * 
                                  ephem->elements.semi_major_axis * 
                                  ephem->elements.semi_major_axis)); /* Mean motion */
-    float M = ephem->elements.true_anomaly + n * dt; /* Simplified, should solve Kepler */
     
-    /* ... solve Kepler's equation for E, compute true anomaly ... */
-    /* Simplified: just use elements_to_state with updated nu */
+    /* Compute epoch mean anomaly from epoch true anomaly */
+    double e = (double)ephem->elements.eccentricity;
+    double nu0 = (double)ephem->elements.true_anomaly;
+    double tan_E0_2 = sqrt((1.0 - e) / (1.0 + e)) * tan(nu0 * 0.5);
+    double E0 = 2.0 * atan(tan_E0_2);
+    double M0 = E0 - e * sin(E0);
+    
+    /* Propagate mean anomaly */
+    double M = M0 + (double)n * (double)dt;
+    
+    /* Solve Kepler's equation for eccentric anomaly */
+    double E = lg_kepler_solve(M, e, 1e-12, 50);
+    
+    /* Convert eccentric anomaly to true anomaly */
+    float nu = (float)(2.0 * atan(sqrt((1.0 + e) / (1.0 - e)) * tan(E * 0.5)));
+    
     lg_orbital_elements_t oe = ephem->elements;
-    oe.true_anomaly = fmodf(M, 2.0f*M_PI);
+    oe.true_anomaly = nu;
     
     lg_elements_to_state(&oe, ephem->mu, pos, vel);
 }
@@ -313,6 +325,8 @@ static inline float lg_mga_evaluate(const lg_planet_ephemeris_t** planets,
         lg_vec3_t v_inf_arr = lg_vec3_sub(sol.v2, v_next);
         float vinf_mag = lg_vec3_len(v_inf_arr);
         
+        total_dv += vinf_mag;
+        
         if (i < n_swingbys - 1) {
             /* Gravity assist turn */
             /* Max turn angle based on rp constraint */
@@ -321,11 +335,25 @@ static inline float lg_mga_evaluate(const lg_planet_ephemeris_t** planets,
             float e_min = 1.0f + rp_min * vinf_mag * vinf_mag / mu_pl;
             float delta_max = 2.0f * asinf(1.0f/e_min);
             
-            /* Apply turn (simplified: rotate in plane by delta_max) */
-            /* Actually need to solve for optimal turn angle to target next planet */
-            lg_vec3_t plane_norm = lg_vec3_norm(lg_vec3_cross(r_next, v_next));
-            /* ... rotation ... */
-            v_inf_out[i] = v_inf_arr; /* Simplified */
+            /* Rotate v_inf around planet's orbital angular momentum */
+            lg_vec3_t h = lg_vec3_cross(r_next, v_next);
+            float h_mag = lg_vec3_len(h);
+            if (h_mag > 1e-12f) {
+                lg_vec3_t axis = lg_vec3_scale(h, 1.0f / h_mag);
+                float c = cosf(delta_max);
+                float s = sinf(delta_max);
+                float dot = lg_vec3_dot(axis, v_inf_arr);
+                
+                /* Rodrigues' rotation formula */
+                lg_vec3_t term1 = lg_vec3_scale(v_inf_arr, c);
+                lg_vec3_t term2 = lg_vec3_scale(lg_vec3_cross(axis, v_inf_arr), s);
+                lg_vec3_t term3 = lg_vec3_scale(axis, dot * (1.0f - c));
+                v_inf_out[i] = lg_vec3_add(term1, lg_vec3_add(term2, term3));
+            } else {
+                v_inf_out[i] = v_inf_arr;
+            }
+        } else {
+            v_inf_out[i] = v_inf_arr;
         }
         
         r_prev = r_next;

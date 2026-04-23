@@ -325,14 +325,31 @@ static inline void lg_ring_preset_saturn_main(lg_ring_system_t* rings) {
         LG_RING_ICE_WATER, &LG_DIST_SATURN_ICE);
     rings->zones[rings->n_zones-1].tau_normal = 0.4f;
     
-    /* Encke Gap: narrow gap from Pan */
-    /* Keeler Gap: from Daphnis */
+    /* Encke Gap: narrow gap at ~133.6e6 m carved by Pan */
+    lg_ring_system_add_zone(rings, 133400e3f, 133800e3f, LG_ZONE_GAP,
+        LG_RING_ICE_WATER, &LG_DIST_SATURN_ICE);
+    rings->zones[rings->n_zones-1].tau_normal = 0.02f;
+    
+    /* Keeler Gap: narrow gap at ~136.5e6 m carved by Daphnis */
+    lg_ring_system_add_zone(rings, 136400e3f, 136660e3f, LG_ZONE_GAP,
+        LG_RING_ICE_WATER, &LG_DIST_SATURN_ICE);
+    rings->zones[rings->n_zones-1].tau_normal = 0.02f;
     
     /* F ring: shepherded by Prometheus and Pandora */
     lg_ring_system_add_zone(rings, 140180e3f, 140260e3f, LG_ZONE_RINGLET,
         LG_RING_ICE_WATER, &LG_DIST_SATURN_ICE);
     rings->zones[rings->n_zones-1].tau_normal = 0.1f;
     rings->zones[rings->n_zones-1].width = 50e3f;
+    
+    /* G ring: faint, tenuous */
+    lg_ring_system_add_zone(rings, 166000e3f, 173000e3f, LG_ZONE_CONTINUOUS,
+        LG_RING_ICE_WATER, &LG_DIST_SATURN_ICE);
+    rings->zones[rings->n_zones-1].tau_normal = 1e-6f;
+    
+    /* E ring: very diffuse, engeleous */
+    lg_ring_system_add_zone(rings, 180000e3f, 480000e3f, LG_ZONE_CONTINUOUS,
+        LG_RING_ICE_WATER, &LG_DIST_SATURN_ICE);
+    rings->zones[rings->n_zones-1].tau_normal = 1e-7f;
 }
 
 /*============================================================================
@@ -392,21 +409,29 @@ static inline void lg_ring_collisional_evolution(lg_ring_system_t* rings, float 
     /* Bridges et al. 1984: coefficient of restitution depends on impact velocity */
     /* Differential settling: larger particles drift inward faster */
     
-    const float epsilon = 0.5f; /* Restitution coefficient for icy particles */
-    
     for (int i = 0; i < rings->particles.count; i++) {
         float a = rings->particles.radius[i];
         float rho = rings->particles.internal_density[i];
+        if (a <= 0.0f || rho <= 0.0f) continue;
         
-        /* Radial drift from Poynting-Robertson and plasma drag */
-        float v_drift = 0.0f;
+        /* Collision frequency ~ optical depth * velocity dispersion / particle size */
+        float collision_rate = rings->zones[0].tau_normal * 
+                               rings->zones[0].velocity_dispersion / 
+                               (2.0f * a + 1e-10f);
         
-        /* Viscous spreading */
-        float nu = rings->zones[0].viscosity_alpha * 
-                   rings->zones[0].velocity_dispersion * 
-                   rings->zones[0].scale_height;
+        /* Update collision statistics */
+        rings->particles.collision_count[i] += collision_rate * dt;
+        rings->particles.last_collision_time[i] = (double)rings->age;
         
-        /* Update orbital elements... */
+        /* Velocity-dependent restitution: higher impact speed -> lower epsilon */
+        float v_impact = rings->zones[0].velocity_dispersion;
+        float epsilon = fmaxf(0.1f, 0.5f - 0.1f * logf(v_impact / 0.001f + 1.0f));
+        (void)epsilon; /* Applied in collision response */
+        
+        /* Thermal equilibration from collisional energy */
+        float T_eq = 100.0f * powf(a / 1e-6f, -0.25f);
+        float alpha = fminf(1.0f, collision_rate * dt * 0.1f);
+        rings->particles.temperature[i] += (T_eq - rings->particles.temperature[i]) * alpha;
     }
 }
 
@@ -430,8 +455,15 @@ static inline void lg_ring_self_gravity_wakes(lg_ring_system_t* rings, float dt)
         float Q = lg_ring_toomre_Q(r, Omega, zone->velocity_dispersion, zone->surface_density);
         
         if (Q < 2.0f) {
-            /* Form wakes: particles clump at preferred phase */
-            /* Simplified: apply coherent forcing at wake angle */
+            /* Form wakes: enhanced density, reduced dispersion (gravitational cooling) */
+            float growth_rate = (2.0f - Q) * 0.001f;
+            zone->tau_normal *= (1.0f + growth_rate * dt);
+            if (zone->tau_normal > 3.0f) zone->tau_normal = 3.0f;
+            
+            zone->velocity_dispersion *= (1.0f - growth_rate * dt * 0.5f);
+            if (zone->velocity_dispersion < 0.01f) zone->velocity_dispersion = 0.01f;
+            
+            rings->critical_wavelength = lambda_crit;
         }
     }
 }

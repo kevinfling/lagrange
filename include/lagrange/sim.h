@@ -328,6 +328,67 @@ static inline bool lg_collide_capsule_capsule(
     return true;
 }
 
+/* Sphere-cylinder collision */
+static inline bool lg_collide_sphere_cylinder(
+    lg_vec3_t sphere_pos, float sphere_radius,
+    lg_vec3_t cyl_pos, lg_vec3_t cyl_axis, float cyl_half_height, float cyl_radius,
+    lg_contact_t* out_contact
+) {
+    cyl_axis = lg_vec3_norm(cyl_axis);
+    
+    lg_vec3_t to_sphere = lg_vec3_sub(sphere_pos, cyl_pos);
+    float axial = lg_vec3_dot(to_sphere, cyl_axis);
+    lg_vec3_t axial_vec = lg_vec3_scale(cyl_axis, axial);
+    lg_vec3_t radial_vec = lg_vec3_sub(to_sphere, axial_vec);
+    float radial_dist = lg_vec3_len(radial_vec);
+    
+    lg_vec3_t normal;
+    float penetration;
+    lg_vec3_t point;
+    
+    if (axial >= -cyl_half_height && axial <= cyl_half_height) {
+        /* Side collision */
+        if (radial_dist < 1e-6f) {
+            normal = lg_vec3(1.0f, 0.0f, 0.0f);
+        } else {
+            normal = lg_vec3_scale(radial_vec, 1.0f / radial_dist);
+        }
+        penetration = (sphere_radius + cyl_radius) - radial_dist;
+        if (penetration < 0.0f) return false;
+        point = lg_vec3_add(cyl_pos, lg_vec3_add(axial_vec, lg_vec3_scale(normal, cyl_radius)));
+    } else {
+        float cap_sign = (axial > 0.0f) ? 1.0f : -1.0f;
+        float axial_from_cap = fabsf(axial) - cyl_half_height;
+        lg_vec3_t cap_center = lg_vec3_add(cyl_pos, lg_vec3_scale(cyl_axis, cap_sign * cyl_half_height));
+        
+        if (radial_dist <= cyl_radius) {
+            /* Cap face collision */
+            normal = lg_vec3_scale(cyl_axis, cap_sign);
+            penetration = sphere_radius - axial_from_cap;
+            if (penetration < 0.0f) return false;
+            point = lg_vec3_add(cap_center, radial_vec);
+        } else {
+            /* Edge collision */
+            float radial_from_edge = radial_dist - cyl_radius;
+            float dist = sqrtf(radial_from_edge * radial_from_edge + axial_from_cap * axial_from_cap);
+            if (dist > sphere_radius) return false;
+            if (dist < 1e-6f) {
+                normal = lg_vec3_scale(cyl_axis, cap_sign);
+            } else {
+                lg_vec3_t edge_point = lg_vec3_add(cap_center, lg_vec3_scale(radial_vec, cyl_radius / radial_dist));
+                normal = lg_vec3_norm(lg_vec3_sub(sphere_pos, edge_point));
+            }
+            penetration = sphere_radius - dist;
+            point = lg_vec3_add(sphere_pos, lg_vec3_scale(normal, -sphere_radius));
+        }
+    }
+    
+    out_contact->normal = normal;
+    out_contact->penetration = penetration;
+    out_contact->point = point;
+    return true;
+}
+
 /*============================================================================
  * Collision Response
  *===========================================================================*/
@@ -636,6 +697,26 @@ static inline void lg_broad_phase(lg_world_t* world, lg_contact_t* contacts, int
                     ca->capsule.half_height, ca->capsule.radius + ca->margin,
                     tb->position, lg_quat_rotate(tb->rotation, lg_vec3_up()),
                     cb->capsule.half_height, cb->capsule.radius + cb->margin,
+                    &contact
+                );
+            }
+            /* Sphere-cylinder */
+            else if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_CYLINDER) {
+                collided = lg_collide_sphere_cylinder(
+                    ta->position, ca->sphere.radius + ca->margin,
+                    tb->position, lg_quat_rotate(tb->rotation, lg_vec3_up()),
+                    cb->cylinder.half_height, cb->cylinder.radius + cb->margin,
+                    &contact
+                );
+            }
+            /* Cylinder-sphere (swap) */
+            else if (ca->type == LG_SHAPE_CYLINDER && cb->type == LG_SHAPE_SPHERE) {
+                contact.entity_a = s->entities[j];
+                contact.entity_b = s->entities[i];
+                collided = lg_collide_sphere_cylinder(
+                    tb->position, cb->sphere.radius + cb->margin,
+                    ta->position, lg_quat_rotate(ta->rotation, lg_vec3_up()),
+                    ca->cylinder.half_height, ca->cylinder.radius + ca->margin,
                     &contact
                 );
             }

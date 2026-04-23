@@ -102,26 +102,147 @@ static inline float lg_cdf_lognormal(float x, float mu, float sigma) {
     return 0.5f + 0.5f * erff((logf(x) - mu) / (sigma * sqrtf(2.0f)));
 }
 
+/* Inverse standard normal CDF (Acklam rational approximation) */
+static inline float lg_icdf_normal(float p) {
+    if (p <= 0.0f) return -INFINITY;
+    if (p >= 1.0f) return INFINITY;
+
+    float a1 = -39.6968302866538f;
+    float a2 = 220.946098424521f;
+    float a3 = -275.928510446969f;
+    float a4 = 138.357751867269f;
+    float a5 = -30.6647980661472f;
+    float a6 = 2.50662827745924f;
+
+    float b1 = -54.4760987982241f;
+    float b2 = 161.585836858041f;
+    float b3 = -155.698979859887f;
+    float b4 = 66.8013118877197f;
+    float b5 = -13.2806811558857f;
+
+    float c1 = -0.00778489400243029f;
+    float c2 = -0.322396458441136f;
+    float c3 = -2.40075827716184f;
+    float c4 = -2.54973253934373f;
+    float c5 = 4.37466414146497f;
+    float c6 = 2.93816398269878f;
+
+    float d1 = 0.00778469570904146f;
+    float d2 = 0.32246712907004f;
+    float d3 = 2.445134137143f;
+    float d4 = 3.75440866190742f;
+
+    float p_low  = 0.02425f;
+    float p_high = 1.0f - p_low;
+
+    float q, r;
+    if (p < p_low) {
+        q = sqrtf(-2.0f * logf(p));
+        return (((((c1*q+c2)*q+c3)*q+c4)*q+c5)*q+c6) /
+               ((((d1*q+d2)*q+d3)*q+d4)*q+1.0f);
+    } else if (p <= p_high) {
+        q = p - 0.5f;
+        r = q*q;
+        return (((((a1*r+a2)*r+a3)*r+a4)*r+a5)*r+a6)*q /
+               (((((b1*r+b2)*r+b3)*r+b4)*r+b5)*r+1.0f);
+    } else {
+        q = sqrtf(-2.0f * logf(1.0f - p));
+        return -(((((c1*q+c2)*q+c3)*q+c4)*q+c5)*q+c6) /
+                ((((d1*q+d2)*q+d3)*q+d4)*q+1.0f);
+    }
+}
+
 static inline float lg_icdf_lognormal(float p, float mu, float sigma) {
-    /* p in (0,1) */
-    if (p <= 0) p = 1e-7f;
-    if (p >= 1) p = 1.0f - 1e-7f;
-    float z = sqrtf(2.0f) * erfcf(2.0f * (1.0f - p)); /* Approximation via erf inverse */
-    /* Better: use rational approximation for erf_inv */
-    /* Simplified: */
-    return expf(mu + sigma * (logf(p/(1-p)) * 0.5f)); /* Logit approx, crude */
+    if (p <= 0.0f) return 0.0f;
+    if (p >= 1.0f) return INFINITY;
+    float z = lg_icdf_normal(p);
+    return expf(mu + sigma * z);
+}
+
+/* Incomplete beta function I_x(a,b) using Lentz's continued fraction */
+static inline double lg_incbeta(double a, double b, double x)
+{
+    #define LG_INCBETA_MAXITER 300
+    #define LG_INCBETA_STOP    1.0e-14
+    #define LG_INCBETA_TINY    1.0e-50
+
+    if (x <= 0.0) return 0.0;
+    if (x >= 1.0) return 1.0;
+    if (a <= 0.0 || b <= 0.0) return 0.0 / 0.0;
+
+    int flipped = 0;
+    if (x > (a + 1.0) / (a + b + 2.0)) {
+        flipped = 1;
+        double t = a; a = b; b = t;
+        x = 1.0 - x;
+    }
+
+    const double log_beta_ab = lgamma(a) + lgamma(b) - lgamma(a + b);
+    const double log_front = a * log(x) + b * log1p(-x) - log_beta_ab;
+    const double front = exp(log_front) / a;
+
+    double f = 1.0;
+    double c = 1.0;
+    double d = 0.0;
+    int i;
+    for (i = 0; i < LG_INCBETA_MAXITER; ++i) {
+        const int m = i / 2;
+        double num;
+        if (i == 0) {
+            num = 1.0;
+        } else if (i % 2 == 0) {
+            num = (m * (b - m) * x) / ((a + 2.0 * m - 1.0) * (a + 2.0 * m));
+        } else {
+            num = -((a + m) * (a + b + m) * x) / ((a + 2.0 * m) * (a + 2.0 * m + 1.0));
+        }
+
+        d = 1.0 + num * d;
+        if (fabs(d) < LG_INCBETA_TINY) d = LG_INCBETA_TINY;
+        d = 1.0 / d;
+
+        c = 1.0 + num / c;
+        if (fabs(c) < LG_INCBETA_TINY) c = LG_INCBETA_TINY;
+
+        const double cd = c * d;
+        f *= cd;
+
+        if (fabs(1.0 - cd) < LG_INCBETA_STOP) {
+            break;
+        }
+    }
+
+    double val = front * (f - 1.0);
+    return flipped ? (1.0 - val) : val;
+
+    #undef LG_INCBETA_MAXITER
+    #undef LG_INCBETA_STOP
+    #undef LG_INCBETA_TINY
 }
 
 /* Beta distribution (for eccentricity) */
 static inline float lg_cdf_beta(float x, float alpha, float beta) {
-    /* Incomplete beta function - use approximation or table */
-    /* For alpha=1, beta=3 (typical eccentricity): CDF = 1 - (1-x)^3 */
-    return 1.0f - powf(1.0f - x, beta);
+    return (float)lg_incbeta((double)alpha, (double)beta, (double)x);
 }
 
 static inline float lg_icdf_beta(float p, float alpha, float beta) {
-    /* Inverse: x = 1 - (1-p)^{1/beta} for alpha=1 */
-    return 1.0f - powf(1.0f - p, 1.0f / beta);
+    if (p <= 0.0f) return 0.0f;
+    if (p >= 1.0f) return 1.0f;
+    if (alpha <= 0.0f || beta <= 0.0f) return 0.0f / 0.0f;
+
+    /* Binary search for x such that lg_cdf_beta(x, alpha, beta) == p */
+    double lo = 0.0, hi = 1.0;
+    double target = (double)p;
+    for (int iter = 0; iter < 60; ++iter) {
+        double mid = (lo + hi) * 0.5;
+        double cdf = lg_incbeta((double)alpha, (double)beta, mid);
+        if (cdf < target) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+        if (hi - lo < 1.0e-12) break;
+    }
+    return (float)((lo + hi) * 0.5);
 }
 
 /* Rayleigh for inclination */
