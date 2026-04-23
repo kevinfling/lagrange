@@ -19,7 +19,8 @@
 #define LAGRANGE_RINGS_H
 
 #include <stdbool.h>
-#include "lagrange_particle.h"
+#include <stdio.h>
+#include "particle.h"
 #include "hierarchical_frame.h"
 
 #ifdef __cplusplus
@@ -228,6 +229,7 @@ static inline float lg_ring_density_wavelength(float r, int m, float Omega, floa
     float Omega_p = Omega * (1.0f - 1.0f/m); /* For inner Lindblad */
     float D = kappa*kappa - m*m*(Omega - Omega_p)*(Omega - Omega_p);
     if (D < 0) return 1e30f; /* Evanescent */
+    const float G = 6.67430e-11f;
     return 4.0f * M_PI * M_PI * sigma * sigma / (G * r * fabsf(D) + 1e-30f);
 }
 
@@ -359,16 +361,42 @@ static inline void lg_ring_preset_saturn_main(lg_ring_system_t* rings) {
 /* Sample from power-law size distribution */
 static inline float lg_ring_sample_size(const lg_ring_size_distribution_t* dist) {
     /* Rejection sampling for truncated power law with exponential cutoff */
-    float u = (float)rand() / RAND_MAX;
+    float u = (float)rand() / (float)RAND_MAX;
     float a = dist->a_min * powf(dist->a_max / dist->a_min, u);
     
     /* Apply exponential cutoff */
     float cutoff = expf(-a / dist->a_cutoff);
-    if ((float)rand() / RAND_MAX > cutoff) {
+    if ((float)rand() / (float)RAND_MAX > cutoff) {
         a = dist->a_min; /* Reject to minimum */
     }
     
     return a;
+}
+
+/* Ensure particle arrays have capacity for at least n total particles */
+static inline void _lg_ring_particles_ensure(lg_ring_particle_t* p, int n) {
+    if (n <= p->capacity) return;
+    int new_cap = (p->capacity < 8) ? 16 : p->capacity * 2;
+    while (new_cap < n) new_cap *= 2;
+    
+    p->base.x = (float*)realloc(p->base.x, new_cap * sizeof(float));
+    p->base.y = (float*)realloc(p->base.y, new_cap * sizeof(float));
+    p->base.z = (float*)realloc(p->base.z, new_cap * sizeof(float));
+    p->base.vx = (float*)realloc(p->base.vx, new_cap * sizeof(float));
+    p->base.vy = (float*)realloc(p->base.vy, new_cap * sizeof(float));
+    p->base.vz = (float*)realloc(p->base.vz, new_cap * sizeof(float));
+    p->radius = (float*)realloc(p->radius, new_cap * sizeof(float));
+    p->mass = (float*)realloc(p->mass, new_cap * sizeof(float));
+    p->composition = (uint32_t*)realloc(p->composition, new_cap * sizeof(uint32_t));
+    p->internal_density = (float*)realloc(p->internal_density, new_cap * sizeof(float));
+    p->temperature = (float*)realloc(p->temperature, new_cap * sizeof(float));
+    p->charge = (float*)realloc(p->charge, new_cap * sizeof(float));
+    p->collision_count = (float*)realloc(p->collision_count, new_cap * sizeof(float));
+    p->last_collision_time = (float*)realloc(p->last_collision_time, new_cap * sizeof(float));
+    for (int d = 0; d < 3; d++) {
+        p->spin[d] = (float*)realloc(p->spin[d], new_cap * sizeof(float));
+    }
+    p->capacity = new_cap;
 }
 
 /* Initialize particles for a zone */
@@ -376,28 +404,56 @@ static inline void lg_ring_zone_populate(lg_ring_zone_t* zone, lg_ring_system_t*
     float r_mid = (zone->r_inner + zone->r_outer) * 0.5f;
     float dr = (zone->r_outer - zone->r_inner) * 0.5f;
     float Omega = sqrtf(rings->planet_mass * 6.67430e-11f / (r_mid * r_mid * r_mid));
+    const float G = 6.67430e-11f;
+    
+    lg_ring_particle_t* p = &rings->particles;
+    int start = p->count;
+    _lg_ring_particles_ensure(p, start + n_particles);
     
     for (int i = 0; i < n_particles; i++) {
+        int idx = start + i;
+        
         /* Radial position with surface density profile */
-        float u = (float)rand() / RAND_MAX;
+        float u = (float)rand() / (float)RAND_MAX;
         float r = r_mid + (u - 0.5f) * 2.0f * dr;
         
         /* Azimuth */
-        float theta = 2.0f * M_PI * (float)rand() / RAND_MAX;
+        float theta = 2.0f * M_PI * (float)rand() / (float)RAND_MAX;
         
         /* Vertical: Gaussian distribution */
-        float z = zone->scale_height * sqrtf(-2.0f * logf((float)rand() / RAND_MAX + 1e-10f)) *
-                  cosf(2.0f * M_PI * (float)rand() / RAND_MAX);
+        float z = zone->scale_height * sqrtf(-2.0f * logf((float)rand() / (float)RAND_MAX + 1e-10f)) *
+                  cosf(2.0f * M_PI * (float)rand() / (float)RAND_MAX);
         
         /* Keplerian velocity with dispersion */
-        float v_kep = sqrtf(rings->planet_mass * 6.67430e-11f / r);
-        float v_r = zone->velocity_dispersion * (float)rand() / RAND_MAX;
-        float v_theta = v_kep + zone->velocity_dispersion * (float)rand() / RAND_MAX;
-        float v_z = zone->velocity_dispersion * (float)rand() / RAND_MAX;
+        float v_kep = sqrtf(rings->planet_mass * G / r);
+        float v_r = zone->velocity_dispersion * ((float)rand() / (float)RAND_MAX - 0.5f);
+        float v_theta = v_kep + zone->velocity_dispersion * ((float)rand() / (float)RAND_MAX - 0.5f);
+        float v_z = zone->velocity_dispersion * ((float)rand() / (float)RAND_MAX - 0.5f);
         
-        /* Add to particle system... */
-        /* (would call lg_particle_add with ring-specific data) */
+        /* Store in SoA */
+        p->base.x[idx] = r * cosf(theta);
+        p->base.y[idx] = r * sinf(theta);
+        p->base.z[idx] = z;
+        p->base.vx[idx] = v_r * cosf(theta) - v_theta * sinf(theta);
+        p->base.vy[idx] = v_r * sinf(theta) + v_theta * cosf(theta);
+        p->base.vz[idx] = v_z;
+        
+        /* Physical properties */
+        float a = lg_ring_sample_size(&zone->size_dist);
+        float rho = zone->size_dist.rho_bulk * (0.8f + 0.2f * (float)rand() / (float)RAND_MAX);
+        p->radius[idx] = a;
+        p->internal_density[idx] = rho;
+        p->mass[idx] = (4.0f / 3.0f) * M_PI * a * a * a * rho;
+        p->composition[idx] = (uint32_t)zone->composition;
+        p->temperature[idx] = 80.0f; /* Saturn ring temperature (K) */
+        p->charge[idx] = 0.0f;
+        p->collision_count[idx] = 0.0f;
+        p->last_collision_time[idx] = 0.0f;
+        for (int d = 0; d < 3; d++) p->spin[d][idx] = 0.0f;
     }
+    
+    p->count = start + n_particles;
+    p->base.count = p->count;
 }
 
 /*============================================================================
@@ -461,7 +517,7 @@ static inline void lg_ring_self_gravity_wakes(lg_ring_system_t* rings, float dt)
             if (zone->tau_normal > 3.0f) zone->tau_normal = 3.0f;
             
             zone->velocity_dispersion *= (1.0f - growth_rate * dt * 0.5f);
-            if (zone->velocity_dispersion < 0.01f) zone->velocity_dispersion = 0.01f;
+            if (zone->velocity_dispersion < 1e-6f) zone->velocity_dispersion = 1e-6f;
             
             rings->critical_wavelength = lambda_crit;
         }
@@ -470,24 +526,87 @@ static inline void lg_ring_self_gravity_wakes(lg_ring_system_t* rings, float dt)
 
 /* Main integration step */
 static inline void lg_ring_system_update(lg_ring_system_t* rings, double time, float dt) {
+    const float G = 6.67430e-11f;
     float dt_sub = dt;
     
     /* Substep for collisional dynamics */
     int n_substeps = (int)ceilf(dt / 100.0f); /* Max 100s substeps */
+    if (n_substeps < 1) n_substeps = 1;
     dt_sub = dt / n_substeps;
     
     for (int step = 0; step < n_substeps; step++) {
         /* 1. Keplerian orbits with J2 precession */
-        /* 2. Collision detection and response */
-        /* 3. Self-gravity wake formation */
-        /* 4. Viscous evolution */
-        /* 5. Resonant torques from satellites */
+        for (int i = 0; i < rings->particles.count; i++) {
+            float x = rings->particles.base.x[i];
+            float y = rings->particles.base.y[i];
+            float z = rings->particles.base.z[i];
+            float r2 = x*x + y*y;
+            float r = sqrtf(r2);
+            float r3 = r2 * r;
+            
+            /* Keplerian acceleration */
+            float ax = -G * rings->planet_mass * x / (r3 + 1e-10f);
+            float ay = -G * rings->planet_mass * y / (r3 + 1e-10f);
+            float az = -G * rings->planet_mass * z / (r3 + 1e-10f);
+            
+            /* J2 perturbation: a_z = -3 J2 mu R^2 z / (2 r^5) */
+            float j2_term = -1.5f * rings->j2 * G * rings->planet_mass *
+                            rings->planet_radius * rings->planet_radius * z /
+                            (powf(r2 + z*z, 2.5f) + 1e-10f);
+            az += j2_term;
+            
+            /* Integrate velocity */
+            rings->particles.base.vx[i] += ax * dt_sub;
+            rings->particles.base.vy[i] += ay * dt_sub;
+            rings->particles.base.vz[i] += az * dt_sub;
+            
+            /* Integrate position */
+            rings->particles.base.x[i] += rings->particles.base.vx[i] * dt_sub;
+            rings->particles.base.y[i] += rings->particles.base.vy[i] * dt_sub;
+            rings->particles.base.z[i] += rings->particles.base.vz[i] * dt_sub;
+        }
         
-        lg_ring_self_gravity_wakes(rings, dt_sub);
+        /* 2. Collisional evolution (statistics and thermal equilibration) */
         lg_ring_collisional_evolution(rings, dt_sub);
+        
+        /* 3. Self-gravity wake formation */
+        lg_ring_self_gravity_wakes(rings, dt_sub);
+        
+        /* 4. Viscous radial diffusion: dSigma/dt = (3/r) d/dr[ r^{1/2} d/dr(nu Sigma r^{1/2}) ] */
+        for (int z = 0; z < rings->n_zones; z++) {
+            lg_ring_zone_t* zone = &rings->zones[z];
+            float r = (zone->r_inner + zone->r_outer) * 0.5f;
+            float Omega = sqrtf(G * rings->planet_mass / (r*r*r));
+            float cs = zone->velocity_dispersion;
+            float H = zone->scale_height;
+            float nu = zone->viscosity_alpha * cs * H; /* Shakura-Sunyaev */
+            
+            /* Simple radial diffusion: sigma spreads outward */
+            float diff_rate = 3.0f * nu / (r * r);
+            zone->surface_density *= (1.0f - diff_rate * dt_sub);
+            if (zone->surface_density < 1e-6f) zone->surface_density = 1e-6f;
+            
+            /* Optical depth follows surface density */
+            float a_typ = zone->size_dist.a_cutoff;
+            float area = M_PI * a_typ * a_typ;
+            float mass = (4.0f/3.0f) * M_PI * a_typ*a_typ*a_typ * zone->size_dist.rho_bulk;
+            zone->tau_normal = zone->surface_density * area / mass;
+        }
+        
+        /* 5. Resonant torques from external satellites */
+        for (int z = 0; z < rings->n_zones; z++) {
+            lg_ring_zone_t* zone = &rings->zones[z];
+            if (fabsf(zone->torque_external) > 0.0f) {
+                /* Torque changes angular momentum → surface density redistribution */
+                float torque_effect = zone->torque_external * dt_sub * 1e-20f;
+                zone->surface_density += torque_effect;
+                if (zone->surface_density < 1e-6f) zone->surface_density = 1e-6f;
+            }
+        }
     }
     
     rings->age += dt;
+    rings->last_evolution_step = time;
 }
 
 /*============================================================================
@@ -531,13 +650,26 @@ static inline float lg_ring_phase_function(float phase_angle, lg_ring_compositio
 /* Attach ring system to planet node */
 static inline void lg_node_attach_rings(lg_node_t* planet_node, lg_ring_system_t* rings) {
     /* Create child node for rings */
-    lg_node_t* rings_node = lg_node_create(LG_NODE_EMPTY, "rings");
+    lg_node_t* rings_node = lg_node_create(LG_NODE_EMPTY, rings->name);
     rings_node->user_data = rings;
     
-    /* Add shepherd moons as children */
+    /* Add shepherd moons for gap zones */
+    const float G = 6.67430e-11f;
     for (int i = 0; i < rings->n_zones; i++) {
         if (rings->zones[i].type == LG_ZONE_GAP) {
-            /* Create shepherd moon */
+            char moon_name[64];
+            snprintf(moon_name, sizeof(moon_name), "shepherd_%d", i);
+            lg_node_t* moon = lg_node_create(LG_NODE_BODY, moon_name);
+            
+            float r_gap = (rings->zones[i].r_inner + rings->zones[i].r_outer) * 0.5f;
+            moon->data.body.body.mass = rings->planet_mass * 1e-7f; /* ~10 km moon */
+            moon->data.body.body.radius = 5e3f;
+            moon->data.body.orbit.a = r_gap;
+            moon->data.body.orbit.e = 0.001f;
+            moon->data.body.orbit.mu = G * rings->planet_mass;
+            moon->domain = LG_PHYSICS_KEPLER;
+            
+            lg_node_attach(planet_node, moon);
         }
     }
     
@@ -551,15 +683,22 @@ static inline void lg_ring_lod_update(lg_ring_system_t* rings, float distance_ca
     /* Far: textured ring plane with optical depth */
     /* Very far: point light occluder */
     
+    if (rings->n_zones <= 0) return;
     float ring_width_pixels = (rings->zones[rings->n_zones-1].r_outer - 
-                               rings->zones[0].r_inner) / (distance_camera * pixel_scale);
+                               rings->zones[0].r_inner) / (distance_camera * pixel_scale + 1e-10f);
     
-    if (ring_width_pixels > 1000) {
+    if (ring_width_pixels > 1000.0f) {
         /* Full particle simulation */
-    } else if (ring_width_pixels > 100) {
+        rings->n_particles_target = 100000;
+    } else if (ring_width_pixels > 100.0f) {
         /* Aggregate representation */
+        rings->n_particles_target = 10000;
+    } else if (ring_width_pixels > 10.0f) {
+        /* Textured ring plane */
+        rings->n_particles_target = 1000;
     } else {
-        /* Billboard texture */
+        /* Billboard / point occluder */
+        rings->n_particles_target = 0;
     }
 }
 

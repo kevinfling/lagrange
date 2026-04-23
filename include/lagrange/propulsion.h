@@ -18,6 +18,7 @@
 #define LAGRANGE_PROPULSION_H
 
 #include "math.h"
+#include "gravity.h"
 #include "patched_conic.h"
 #include "floating_origin.h"
 #include "body.h"
@@ -59,6 +60,8 @@ typedef struct {
     /* Sail parameters (if type == LG_PROP_SAIL) */
     float sail_area_m2;       /* Area */
     float sail_efficiency;    /* 0.0-1.0 (reflectivity factor) */
+    
+    lg_propulsion_type_t type;
 } lg_stage_t;
 
 /* Compute mass flow from thrust and Isp: mdot = thrust / (g0 * Isp) */
@@ -482,17 +485,7 @@ typedef struct {
     float lift_drag_ratio;    /* Cl/Cd */
 } lg_aero_vehicle_t;
 
-typedef struct {
-    float rho0;               /* Surface density (kg/m^3) */
-    float scale_height;       /* Atmospheric scale height (m) */
-    float planet_radius;      /* For altitude calculation */
-    float omega;              /* Planet rotation rate (rad/s) */
-} lg_atmosphere_t;
-
-/* Exponential atmosphere model: rho = rho0 * exp(-h/H) */
-static inline float lg_atmosphere_density(const lg_atmosphere_t* atm, float altitude_m) {
-    return atm->rho0 * expf(-altitude_m / atm->scale_height);
-}
+/* lg_atmosphere_t and lg_atmosphere_density are defined in gravity.h */
 
 /* Aerodynamic acceleration in planet-relative frame */
 static inline lg_vec3_t lg_aero_acceleration(
@@ -542,14 +535,14 @@ static inline lg_entry_corridor_t lg_entry_corridor(
     
     /* Periapsis range for aerocapture */
     float beta = vehicle->ballistic_coef;
-    float H = atm->scale_height;
+    float H = (float)atm->H;
     
     /* Minimum: too high = skip out */
     ec.periapsis_min = H * logf(beta * v_entry * v_entry / (2.0f * H * 1.0f)); /* ~1 m/s^2 decel */
     
     /* Maximum: too low = entry/descent */
     float q_max = 500.0f; /* W/cm^2 typical heat limit */
-    float v_circ = sqrtf(approach->mu / (atm->planet_radius + 100000.0f));
+    float v_circ = sqrtf(approach->mu / ((float)atm->body_radius + 100000.0f));
     ec.periapsis_max = H * logf(vehicle->Cd * atm->rho0 * v_entry * v_entry * v_entry / (2.0f * q_max));
     
     ec.feasible = ec.periapsis_min < ec.periapsis_max;

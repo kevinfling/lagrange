@@ -62,6 +62,10 @@ if(LAGRANGE_BUILD_TESTS)
     add_executable(test_gravity tests/test_gravity.c)
     target_link_libraries(test_gravity lagrange m)
     add_test(NAME gravity COMMAND test_gravity)
+    
+    add_executable(test_rings tests/test_rings.c)
+    target_link_libraries(test_rings lagrange m)
+    add_test(NAME rings COMMAND test_rings)
 endif()
 
 # Examples

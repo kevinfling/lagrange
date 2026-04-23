@@ -15,9 +15,9 @@
 #ifndef LAGRANGE_FRAME_H
 #define LAGRANGE_FRAME_H
 
-#include "lagrange_propulsion.h"
-#include "lagrange_particle.h"
-#include "lagrange_floating_origin.h"
+#include "propulsion.h"
+#include "particle.h"
+#include "floating_origin.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -102,7 +102,7 @@ static inline lg_vec3_t lg_hierarchy_transform_local_to_world(const lg_hierarchy
 /* Transform point from world to local space */
 static inline lg_vec3_t lg_hierarchy_transform_world_to_local(const lg_hierarchy_transform_t* t, lg_vec3_t world) {
     lg_vec3_t translated = lg_vec3_sub(world, t->world_pos);
-    lg_vec3_t unrotated = lg_quat_rotate(lg_quat_conjugate(t->world_rot), translated);
+    lg_vec3_t unrotated = lg_quat_rotate(lg_quat_conj(t->world_rot), translated);
     return (lg_vec3_t){
         unrotated.x / t->world_scale.x,
         unrotated.y / t->world_scale.y,
@@ -333,6 +333,11 @@ static inline lg_vec3_t lg_node_world_position(const lg_node_t* node) {
  * 5. SPATIAL INDEXING (DYNAMIC BVH)
  *===========================================================================*/
 
+typedef struct {
+    lg_vec3_t min;
+    lg_vec3_t max;
+} lg_aabb_t;
+
 typedef struct lg_bvh_node_s {
     lg_aabb_t bounds;         /* World-space bounds */
     lg_node_t* object;        /* NULL for internal nodes */
@@ -349,32 +354,32 @@ typedef struct {
     uint32_t version;         /* Last updated frame */
 } lg_bvh_t;
 
+typedef struct { lg_aabb_t bounds; lg_node_t* node; } lg_bvh_leaf_t;
+
+static inline void lg_bvh_collect(lg_node_t* node, lg_bvh_leaf_t* leaves, int* n_leaves) {
+    if (!node) return;
+    if (node->type == LG_NODE_BODY && (node->flags & LG_NODE_SIMULATE)) {
+        float r = node->data.body.body.radius;
+        leaves[*n_leaves].bounds = (lg_aabb_t){
+            .min = {node->transform.world_pos.x - r, node->transform.world_pos.y - r, node->transform.world_pos.z - r},
+            .max = {node->transform.world_pos.x + r, node->transform.world_pos.y + r, node->transform.world_pos.z + r}
+        };
+        leaves[*n_leaves].node = node;
+        (*n_leaves)++;
+    }
+    for (lg_node_t* child = node->first_child; child; child = child->next_sibling) {
+        lg_bvh_collect(child, leaves, n_leaves);
+    }
+}
+
 /* Build BVH from scene graph (rebuild each frame for dynamic objects) */
 static inline void lg_bvh_build(lg_bvh_t* bvh, lg_node_t* scene_root) {
     /* Collect all body nodes with bounds */
-    typedef struct { lg_aabb_t bounds; lg_node_t* node; } leaf_t;
-    leaf_t leaves[1024];
+    lg_bvh_leaf_t leaves[1024];
     int n_leaves = 0;
     
     /* Recursive collection */
-    void collect(lg_node_t* node) {
-        if (!node) return;
-        
-        if (node->type == LG_NODE_BODY && (node->flags & LG_NODE_SIMULATE)) {
-            float r = node->data.body.body.radius;
-            leaves[n_leaves].bounds = (lg_aabb_t){
-                .min = {node->transform.world_pos.x - r, node->transform.world_pos.y - r, node->transform.world_pos.z - r},
-                .max = {node->transform.world_pos.x + r, node->transform.world_pos.y + r, node->transform.world_pos.z + r}
-            };
-            leaves[n_leaves].node = node;
-            n_leaves++;
-        }
-        
-        for (lg_node_t* child = node->first_child; child; child = child->next_sibling) {
-            collect(child);
-        }
-    }
-    collect(scene_root);
+    lg_bvh_collect(scene_root, leaves, &n_leaves);
     
     /* Build tree (simplified: median split on longest axis) */
     /* ... SAH-based construction would go here ... */
@@ -496,9 +501,51 @@ static inline lg_simulation_t* lg_simulation_create(void) {
     sim->events.events = (lg_event_t*)calloc(sim->events.capacity, sizeof(lg_event_t));
     
     /* Initialize floating origin */
-    lg_floating_origin_init(&sim->origin, 1e8f); /* 100,000 km threshold */
+    sim->origin = lg_floating_origin_init(1e8f); /* 100,000 km threshold */
     
     return sim;
+}
+
+/* Recursive physics integration helper */
+static inline void lg_simulation_integrate_node(lg_node_t* node, double substep) {
+    if (!node || !(node->flags & LG_NODE_SIMULATE)) return;
+    
+    switch (node->domain) {
+        case LG_PHYSICS_KEPLER: {
+            /* Analytic two-body propagation */
+            if (node->type == LG_NODE_BODY) {
+                lg_orbit_t* o = &node->data.body.orbit;
+                o->M = fmodf(o->M + o->n * substep, 2.0f * M_PI);
+                /* Update position from mean anomaly */
+                lg_vec3_t r = lg_orbit_position_from_mean_anomaly(o, o->M);
+                node->transform.position = r;
+                node->flags |= LG_NODE_DIRTY;
+            }
+            break;
+        }
+        
+        case LG_PHYSICS_LOW_THRUST: {
+            if (node->type == LG_NODE_SPACECRAFT) {
+                /* Integrate equinoctial elements - placeholder */
+            }
+            break;
+        }
+        
+        case LG_PHYSICS_PATCHED_CONIC: {
+            /* SOI detection and domain switching */
+            if (node->type == LG_NODE_SPACECRAFT) {
+                /* Check for SOI transitions - placeholder */
+            }
+            break;
+        }
+        
+        default: break;
+    }
+    
+    /* Recurse to children */
+    for (lg_node_t* child = node->first_child; child; child = child->next_sibling) {
+        lg_simulation_integrate_node(child, substep);
+    }
 }
 
 /* Main update: one simulation step */
@@ -517,55 +564,12 @@ static inline void lg_simulation_update(lg_simulation_t* sim, double dt_wall) {
         sim->stats.nodes_updated = 0; /* Count during update */
         
         /* 2. Physics integration by domain */
-        void integrate_node(lg_node_t* node) {
-            if (!node || !(node->flags & LG_NODE_SIMULATE)) return;
-            
-            switch (node->domain) {
-                case LG_PHYSICS_KEPLER: {
-                    /* Analytic two-body propagation */
-                    if (node->type == LG_NODE_BODY) {
-                        lg_orbit_t* o = &node->data.body.orbit;
-                        o->M = fmodf(o->M + o->n * substep, 2.0f * M_PI);
-                        /* Update position from mean anomaly */
-                        lg_vec3_t r = lg_orbit_position_from_mean_anomaly(o, o->M);
-                        node->transform.position = r;
-                        node->flags |= LG_NODE_DIRTY;
-                    }
-                    break;
-                }
-                
-                case LG_PHYSICS_LOW_THRUST: {
-                    if (node->type == LG_NODE_SPACECRAFT) {
-                        lg_spacecraft_t* sc = &node->data.spacecraft;
-                        /* Integrate equinoctial elements */
-                        lg_vec3_t accel_rtn = {0, 0, 0}; /* From guidance law */
-                        /* ... apply thrust ... */
-                    }
-                    break;
-                }
-                
-                case LG_PHYSICS_PATCHED_CONIC: {
-                    /* SOI detection and domain switching */
-                    if (node->type == LG_NODE_SPACECRAFT) {
-                        /* Check for SOI transitions */
-                    }
-                    break;
-                }
-                
-                default: break;
-            }
-            
-            /* Recurse to children */
-            for (lg_node_t* child = node->first_child; child; child = child->next_sibling) {
-                integrate_node(child);
-            }
-        }
-        integrate_node(sim->root);
+        lg_simulation_integrate_node(sim->root, substep);
         
         /* 3. Update floating origin if needed */
         if (sim->active_camera) {
             lg_vec3_t cam_pos = lg_node_world_position(sim->active_camera);
-            lg_floating_origin_recenter(&sim->origin, cam_pos);
+            sim->origin.observer_local = cam_pos;
         }
         
         /* 4. Rebuild spatial index */
@@ -648,10 +652,84 @@ static inline int lg_node_serialize(lg_node_t* node, uint8_t* buffer, int capaci
     return pos;
 }
 
-/* Deserialize (recursively creates children) */
+/* Helper for reading data during deserialization */
+static inline bool lg_serialize_read(void* data, int len, const uint8_t* buffer,
+                                      int capacity, int* pos) {
+    if (*pos + len > capacity) return false;
+    memcpy(data, buffer + *pos, len);
+    *pos += len;
+    return true;
+}
+
+/* Deserialize (recursively creates children)
+ * Caller must ensure buffer is valid; returns NULL on truncation. */
 static inline lg_node_t* lg_node_deserialize(const uint8_t* buffer, int* bytes_read) {
-    /* Mirror of serialize... */
-    return NULL; /* TODO: implement */
+    int pos = 0;
+    int capacity = 2147483647; /* INT_MAX — no explicit capacity in API */
+    
+    lg_node_type_t type;
+    if (!lg_serialize_read(&type, sizeof(type), buffer, capacity, &pos)) return NULL;
+    
+    uint8_t name_len;
+    if (!lg_serialize_read(&name_len, 1, buffer, capacity, &pos)) return NULL;
+    
+    char name[64] = {0};
+    if (name_len > 63) name_len = 63;
+    if (!lg_serialize_read(name, name_len, buffer, capacity, &pos)) return NULL;
+    name[name_len] = '\0';
+    
+    lg_node_t* node = lg_node_create(type, name);
+    if (!node) return NULL;
+    
+    if (!lg_serialize_read(&node->transform.position, sizeof(lg_vec3_t), buffer, capacity, &pos)) {
+        free(node);
+        return NULL;
+    }
+    if (!lg_serialize_read(&node->transform.rotation, sizeof(lg_quat_t), buffer, capacity, &pos)) {
+        free(node);
+        return NULL;
+    }
+    
+    switch (type) {
+        case LG_NODE_BODY: {
+            if (!lg_serialize_read(&node->data.body.body, sizeof(lg_body_t), buffer, capacity, &pos) ||
+                !lg_serialize_read(&node->data.body.orbit, sizeof(lg_orbit_t), buffer, capacity, &pos)) {
+                free(node);
+                return NULL;
+            }
+            break;
+        }
+        case LG_NODE_SPACECRAFT: {
+            if (!lg_serialize_read(&node->data.spacecraft.dry_mass, sizeof(float), buffer, capacity, &pos) ||
+                !lg_serialize_read(&node->data.spacecraft.fuel_mass, sizeof(float), buffer, capacity, &pos) ||
+                !lg_serialize_read(&node->data.spacecraft.specific_impulse, sizeof(float), buffer, capacity, &pos)) {
+                free(node);
+                return NULL;
+            }
+            break;
+        }
+        default: break;
+    }
+    
+    int child_count;
+    if (!lg_serialize_read(&child_count, sizeof(int), buffer, capacity, &pos)) {
+        free(node);
+        return NULL;
+    }
+    
+    for (int i = 0; i < child_count; i++) {
+        int child_bytes = 0;
+        lg_node_t* child = lg_node_deserialize(buffer + pos, &child_bytes);
+        if (!child) {
+            lg_node_destroy(node);
+            return NULL;
+        }
+        lg_node_attach(node, child);
+        pos += child_bytes;
+    }
+    
+    if (bytes_read) *bytes_read = pos;
+    return node;
 }
 
 /*============================================================================

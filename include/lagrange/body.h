@@ -31,6 +31,7 @@ typedef struct {
     /* Mass properties */
     float mass;
     float inv_mass;         /* 1/mass, 0 for static */
+    float radius;           /* For collision, visualization, SOI calc */
     
     /* Inertia tensor (diagonal for now) */
     lg_vec3_t inertia;      /* Principal moments */

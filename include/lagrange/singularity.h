@@ -295,7 +295,10 @@ static inline float lg_lensing_deflection(const lg_schwarzschild_t* bh, float b)
     return 4.0f * bh->M / b;
 }
 
-/* Exact geodesic ray tracer for strong lensing */
+/* Exact geodesic ray tracer for strong lensing
+ * Integrates the photon orbital equation d^2u/dφ^2 + u = 3Mu^2
+ * where u = 1/r, using RK4 in the (u, w=du/dφ) phase space.
+ * Returns false if photon is captured by the black hole. */
 static inline bool lg_trace_ray_schwarzschild(lg_ray_t* ray,
                                               const lg_schwarzschild_t* bh,
                                               float max_distance,
@@ -303,28 +306,112 @@ static inline bool lg_trace_ray_schwarzschild(lg_ray_t* ray,
                                               lg_vec3_t* hit_point) {
     float b = ray->impact_param;
     float r0 = lg_vec3_len(ray->origin);
+    float M = bh->M;
+    float rs = bh->rs;
     
-    /* Photons with b < 3*sqrt(3)*M get captured */
-    float b_crit = 3.0f * sqrtf(3.0f) * bh->M; /* ~5.196 M */
+    if (r0 <= rs || steps <= 0) return false;
     
-    if (b < b_crit && r0 < 10.0f * bh->rs) {
-        /* Check if ray spirals into horizon */
-        /* Solve effective potential: V = (1 - 2M/r)(1 + b^2/r^2) */
-        float r_min = 2.0f * b; /* Approximate turning point */
-        float V_max = (1.0f - bh->rs/r_min) * (1.0f + b*b/(r_min*r_min));
+    /* Capture check: photons with b < 3*sqrt(3)*M and insufficient
+     * energy to climb out of the potential well are captured. */
+    float b_crit = 3.0f * sqrtf(3.0f) * M;
+    float u0 = 1.0f / r0;
+    float du2_init = 1.0f / (b * b) - u0 * u0 + 2.0f * M * u0 * u0 * u0;
+    
+    if (b < b_crit && du2_init < 0.0f) {
+        /* Classically forbidden at starting radius → captured */
+        return false;
+    }
+    
+    /* Orbital plane basis: e_x points to origin, e_y is perpendicular
+     * in the direction of motion (φ increases). */
+    lg_vec3_t e_x = lg_vec3_norm(ray->origin);
+    lg_vec3_t n = lg_vec3_cross(ray->origin, ray->direction);
+    lg_vec3_t e_y;
+    if (lg_vec3_len_sq(n) < 1e-12f) {
+        /* Radial ray — pick arbitrary perpendicular basis */
+        e_y = (fabsf(e_x.x) < 0.9f)
+            ? lg_vec3_norm(lg_vec3_cross(e_x, lg_vec3(1.0f, 0.0f, 0.0f)))
+            : lg_vec3_norm(lg_vec3_cross(e_x, lg_vec3(0.0f, 1.0f, 0.0f)));
+    } else {
+        n = lg_vec3_norm(n);
+        e_y = lg_vec3_norm(lg_vec3_cross(n, e_x));
+    }
+    
+    /* Ensure φ increases in the direction of motion */
+    float v_phi = lg_vec3_dot(ray->direction, e_y);
+    if (v_phi < 0.0f) {
+        e_y = lg_vec3_neg(e_y);
+        v_phi = -v_phi;
+    }
+    
+    /* Initial state: u = 1/r, w = du/dφ */
+    float u = u0;
+    float w = (du2_init > 0.0f)
+        ? ((lg_vec3_dot(ray->direction, e_x) < 0.0f) ? sqrtf(du2_init) : -sqrtf(du2_init))
+        : 0.0f;
+    /* Ingoing (v_r < 0) → u increases with φ → w > 0 */
+    /* Outgoing (v_r > 0) → u decreases with φ → w < 0 */
+    
+    float phi = 0.0f;
+    float dphi = (2.0f * M_PI) / steps;
+    float dist_traced = 0.0f;
+    bool ingoing = (w > 0.0f);
+    
+    for (int i = 0; i < steps; i++) {
+        /* RK4 on du/dφ = w, dw/dφ = 3Mu^2 - u */
+        float k1_u = w;
+        float k1_w = 3.0f * M * u * u - u;
         
-        if (V_max > 1.0f) {
-            /* Photon falls into black hole */
+        float u2 = u + 0.5f * dphi * k1_u;
+        float w2 = w + 0.5f * dphi * k1_w;
+        float k2_u = w2;
+        float k2_w = 3.0f * M * u2 * u2 - u2;
+        
+        float u3 = u + 0.5f * dphi * k2_u;
+        float w3 = w + 0.5f * dphi * k2_w;
+        float k3_u = w3;
+        float k3_w = 3.0f * M * u3 * u3 - u3;
+        
+        float u4 = u + dphi * k3_u;
+        float w4 = w + dphi * k3_w;
+        float k4_u = w4;
+        float k4_w = 3.0f * M * u4 * u4 - u4;
+        
+        float u_new = u + dphi / 6.0f * (k1_u + 2.0f * k2_u + 2.0f * k3_u + k4_u);
+        float w_new = w + dphi / 6.0f * (k1_w + 2.0f * k2_w + 2.0f * k3_w + k4_w);
+        
+        /* Horizon crossing */
+        if (u_new > 1.0f / rs) {
             return false;
+        }
+        
+        /* Turning point detection: w changes sign while ingoing */
+        if (ingoing && w * w_new < 0.0f) {
+            ingoing = false;
+            /* We have reached periapsis and are now outgoing */
+        }
+        
+        /* Update approximate Euclidean distance traced */
+        float r_old = 1.0f / u;
+        float r_new = 1.0f / u_new;
+        dist_traced += fabsf(r_new - r_old);
+        
+        u = u_new;
+        w = w_new;
+        phi += dphi;
+        
+        if (dist_traced >= max_distance) {
+            break;
         }
     }
     
-    /* Integrate null geodesic */
-    for (int i = 0; i < steps; i++) {
-        /* Update using conservation of b and E */
-        /* dr/dl = ... angular equation ... */
-    }
-    
+    /* Reconstruct 3D hit point in original coordinate frame */
+    float r_final = 1.0f / u;
+    float c = cosf(phi);
+    float s = sinf(phi);
+    *hit_point = lg_vec3_add(
+        lg_vec3_scale(e_x, r_final * c),
+        lg_vec3_scale(e_y, r_final * s));
     return true;
 }
 
@@ -557,14 +644,34 @@ static inline float lg_hawking_temperature(float M_kg) {
     return hbar * LG_C*LG_C*LG_C / (8.0f * M_PI * LG_G * M_kg * kB);
 }
 
-/* Mass evolution with fractional memory (non-Markovian evaporation) */
+/* Mass evolution with fractional memory (non-Markovian evaporation)
+ * Standard Hawking: dM/dt = -K/M^2  →  M(t) = (M0^3 - 3Kt)^{1/3}
+ * Fractional: D^alpha M = -K/M^2 incorporates quantum memory via
+ * Caputo derivative. For alpha < 1 the evaporation is slowed.
+ * We approximate the solution by blending early-time fractional
+ * behaviour with the standard late-time solution. */
 static inline float lg_bh_mass_fractional(float M0, float t, float alpha, float tau) {
-    /* Standard: M(t) = (M0^3 - 3K*t)^{1/3} */
-    /* Fractional: incorporates quantum memory effects */
-    float M_std = powf(M0*M0*M0 - 3.0f * 1e-6f * t, 1.0f/3.0f);
+    const float K = 1e-6f;
+    float M_cubed = M0 * M0 * M0;
+    float M_std_cubed = M_cubed - 3.0f * K * t;
+    if (M_std_cubed <= 0.0f) return 0.0f;
+    float M_std = powf(M_std_cubed, 1.0f / 3.0f);
     
-    /* Fractional correction: M(t) = M_std * (1 + fractional integral of quantum noise) */
-    return M_std; /* Simplified - full version needs fractional calculus from lagrange_fractional.h */
+    if (alpha <= 0.0f || alpha >= 1.0f || tau <= 0.0f || t <= 0.0f) {
+        return M_std;
+    }
+    
+    /* Short-time fractional expansion:
+     * D^alpha M ≈ -K/M0^2  →  M(t) ≈ M0 - (K/M0^2) * t^alpha / Gamma(1+alpha) */
+    float gamma_1pa = tgammaf(1.0f + alpha);
+    float M_early = M0 - K / (M0 * M0) * powf(t, alpha) / gamma_1pa;
+    if (M_early < 0.0f) M_early = 0.0f;
+    
+    /* Blend from early-time fractional to late-time standard,
+     * using the memory time scale tau as the crossover. */
+    float blend = 1.0f - expf(-t / tau);
+    float M_result = (1.0f - blend) * M_early + blend * M_std;
+    return fmaxf(0.0f, M_result);
 }
 
 #ifdef __cplusplus

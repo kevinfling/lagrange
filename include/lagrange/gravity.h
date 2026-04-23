@@ -411,6 +411,69 @@ typedef struct {
     double true_anomaly;        /* ν (radians) */
 } lg_orbital_elements_t;
 
+/* Compact orbit representation for propagation (used by scene graph & propulsion) */
+typedef struct {
+    float a;        /* Semi-major axis (m) */
+    float e;        /* Eccentricity */
+    float i;        /* Inclination (rad) */
+    float Omega;    /* RAAN (rad) */
+    float w;        /* Argument of periapsis (rad) */
+    float M;        /* Current mean anomaly (rad) */
+    float M0;       /* Mean anomaly at epoch (rad) */
+    float n;        /* Mean motion (rad/s) */
+    float mu;       /* Gravitational parameter (m³/s²) */
+    double epoch;   /* Reference epoch (seconds) */
+} lg_orbit_t;
+
+/* Compute position from mean anomaly using classical orbital elements.
+ * Solves Kepler's equation and rotates to inertial frame. */
+static inline lg_vec3_t lg_orbit_position_from_mean_anomaly(const lg_orbit_t* orb, float M) {
+    /* Solve Kepler's equation for eccentric anomaly E */
+    float E = M;
+    for (int iter = 0; iter < 20; iter++) {
+        float dE = (E - orb->e * sinf(E) - M) / (1.0f - orb->e * cosf(E));
+        E -= dE;
+        if (fabsf(dE) < 1e-8f) break;
+    }
+    
+    /* True anomaly */
+    float sin_E = sinf(E);
+    float cos_E = cosf(E);
+    float beta = orb->e / (1.0f + sqrtf(1.0f - orb->e * orb->e));
+    float sin_nu = sin_E + beta * (sin_E * cos_E * 2.0f - sin_E * (cos_E * cos_E - sin_E * sin_E));
+    float cos_nu = cos_E - beta * (sin_E * sin_E * 2.0f);
+    /* Simplified: nu = 2*atan2(sqrt(1+e)*sin(E/2), sqrt(1-e)*cos(E/2)) */
+    float half_E = E * 0.5f;
+    sin_nu = 2.0f * sinf(half_E) * cosf(half_E);
+    cos_nu = cosf(half_E) * cosf(half_E) - sinf(half_E) * sinf(half_E);
+    float denom = 1.0f - orb->e;
+    sin_nu = sqrtf(1.0f + orb->e) * sinf(half_E) * 2.0f;
+    cos_nu = sqrtf(1.0f - orb->e) * cosf(half_E);
+    float nu = 2.0f * atan2f(sinf(half_E) * sqrtf(1.0f + orb->e), cosf(half_E) * sqrtf(1.0f - orb->e));
+    
+    float r = orb->a * (1.0f - orb->e * cosf(E));
+    
+    /* Position in orbital plane */
+    float x_orb = r * cosf(nu);
+    float y_orb = r * sinf(nu);
+    
+    /* Rotate to inertial frame (3-1-3 Euler angles: Omega, i, w) */
+    float cos_O = cosf(orb->Omega);
+    float sin_O = sinf(orb->Omega);
+    float cos_i = cosf(orb->i);
+    float sin_i = sinf(orb->i);
+    float cos_w = cosf(orb->w);
+    float sin_w = sinf(orb->w);
+    
+    float x = (cos_O * cos_w - sin_O * sin_w * cos_i) * x_orb +
+              (-cos_O * sin_w - sin_O * cos_w * cos_i) * y_orb;
+    float y = (sin_O * cos_w + cos_O * sin_w * cos_i) * x_orb +
+              (-sin_O * sin_w + cos_O * cos_w * cos_i) * y_orb;
+    float z = (sin_i * sin_w) * x_orb + (sin_i * cos_w) * y_orb;
+    
+    return lg_vec3(x, y, z);
+}
+
 /* Compute orbital elements from state vectors */
 static inline lg_orbital_elements_t lg_state_to_elements(
     lg_vec3_t position,

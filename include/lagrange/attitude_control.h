@@ -426,10 +426,23 @@ static inline void lg_cmg_compute_jacobian(lg_cmg_array_t* arr) {
         arr->Jacobian[2][j] = col.z;
     }
     
-    /* Compute singularity index: det(C*C^T) */
-    /* Simplified: just check minimum singular value or condition number */
-    float det = 0.0f; /* Placeholder */
-    arr->singularity_index = det;
+    /* Compute singularity index: det(C*C^T)
+     * Zero determinant → CMG array is in a singularity (cannot produce
+     * torque in at least one direction).
+     * C*C^T is symmetric; A is stored column-major: m[col*3 + row]. */
+    lg_mat3_t A = {{0}};
+    for (int j = 0; j < arr->n_cmgs; j++) {
+        A.m[0] += arr->Jacobian[0][j] * arr->Jacobian[0][j];
+        A.m[1] += arr->Jacobian[1][j] * arr->Jacobian[0][j];
+        A.m[2] += arr->Jacobian[2][j] * arr->Jacobian[0][j];
+        A.m[4] += arr->Jacobian[1][j] * arr->Jacobian[1][j];
+        A.m[5] += arr->Jacobian[2][j] * arr->Jacobian[1][j];
+        A.m[8] += arr->Jacobian[2][j] * arr->Jacobian[2][j];
+    }
+    A.m[3] = A.m[1];
+    A.m[6] = A.m[2];
+    A.m[7] = A.m[5];
+    arr->singularity_index = lg_mat3_determinant(A);
 }
 
 /* Pseudo-inverse steering (Moore-Penrose) with singularity robustness */

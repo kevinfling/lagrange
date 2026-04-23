@@ -24,7 +24,9 @@
 #include "particle.h"
 #include <stdint.h>
 #include <string.h>
+#ifdef __x86_64__
 #include <immintrin.h>  /* For AVX2 double<->float conversion */
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -401,7 +403,7 @@ static inline lg_lambert_solution_t lg_flo_lambert(const lg_floBody_t* r1,
     lg_vec3_t r2f = {(float)p2[0], (float)p2[1], (float)p2[2]};
     
     lg_lambert_problem_t prob = {
-        .r1 = r1f, .r2 = r2f, .tof = dt, .mu = mu,
+        .r1 = r1f, .r2 = r2f, .dt = dt, .mu = mu,
         .short_way = true, .max_iter = 50, .tol = 1e-6f
     };
     

@@ -211,6 +211,166 @@ int test_koopman_cheap_init(void) {
 }
 
 /*============================================================================
+ * MPC Control Test
+ *===========================================================================*/
+
+int test_koopman_mpc_control(void) {
+    /* Use the same harmonic oscillator training data as fit_predict */
+    float dt = 0.1f;
+    float wx = 1.0f, wy = 1.5f, wz = 0.7f;
+    float cx = cosf(wx * dt), sx = sinf(wx * dt);
+    float cy = cosf(wy * dt), sy = sinf(wy * dt);
+    float cz = cosf(wz * dt), sz = sinf(wz * dt);
+    
+    int n_snapshots = 150;
+    int n_states = 6;
+    
+    float* X = (float*)calloc(n_states * n_snapshots, sizeof(float));
+    float* Y = (float*)calloc(n_states * n_snapshots, sizeof(float));
+    
+    float x = 1.0f, vx = 0.3f;
+    float y = 0.5f, vy = 0.2f;
+    float z = 0.3f, vz = 0.1f;
+    for (int n = 0; n < n_snapshots; n++) {
+        X[0 + n*n_states] = x; X[1 + n*n_states] = y; X[2 + n*n_states] = z;
+        X[3 + n*n_states] = vx; X[4 + n*n_states] = vy; X[5 + n*n_states] = vz;
+        
+        float x_next = cx * x + sx * vx;
+        float vx_next = -sx * x + cx * vx;
+        float y_next = cy * y + sy * vy;
+        float vy_next = -sy * y + cy * vy;
+        float z_next = cz * z + sz * vz;
+        float vz_next = -sz * z + cz * vz;
+        
+        Y[0 + n*n_states] = x_next; Y[1 + n*n_states] = y_next; Y[2 + n*n_states] = z_next;
+        Y[3 + n*n_states] = vx_next; Y[4 + n*n_states] = vy_next; Y[5 + n*n_states] = vz_next;
+        
+        x = x_next + 0.03f * sinf(n * 0.7f);
+        vx = vx_next + 0.03f * cosf(n * 0.7f);
+        y = y_next + 0.02f * sinf(n * 0.5f + 1.0f);
+        vy = vy_next + 0.02f * cosf(n * 0.5f + 1.0f);
+        z = z_next + 0.01f * sinf(n * 0.3f + 2.0f);
+        vz = vz_next + 0.01f * cosf(n * 0.3f + 2.0f);
+    }
+    
+    lg_koop_data_t data = {X, Y, n_snapshots, n_states};
+    lg_koopman_t km = {0};
+    lg_koopman_init_cheap_compatible(&km, 6, 0.5f);
+    lg_koopman_fit(&km, &data);
+    
+    /* Set target at origin with zero velocity */
+    lg_vec3_t target_pos = {0.0f, 0.0f, 0.0f};
+    lg_vec3_t target_vel = {0.0f, 0.0f, 0.0f};
+    float complex* target_psi = (float complex*)calloc(km.n_observables, sizeof(float complex));
+    for (int k = 0; k < km.n_observables; k++) {
+        target_psi[k] = lg_koop_observable_dct(&target_pos, &target_vel, km.frequencies[k], k);
+    }
+    
+    lg_koop_mpc_t mpc = {
+        .target_psi = target_psi,
+        .control_cost = 1.0f,
+        .state_cost = 10.0f,
+        .horizon = 5
+    };
+    
+    /* Current state is away from origin — control should push toward origin */
+    lg_vec3_t current_pos = {1.0f, 0.5f, 0.3f};
+    lg_vec3_t current_vel = {0.3f, 0.2f, 0.1f};
+    
+    lg_vec3_t control = lg_koopman_mpc_control(&km, &mpc, &current_pos, &current_vel);
+    
+    /* Control should be finite and non-zero for a non-trivial error */
+    ASSERT_TRUE(isfinite(control.x));
+    ASSERT_TRUE(isfinite(control.y));
+    ASSERT_TRUE(isfinite(control.z));
+    ASSERT_TRUE(fabsf(control.x) + fabsf(control.y) + fabsf(control.z) > 1e-6f);
+    
+    /* Higher state_cost should yield stronger control */
+    mpc.state_cost = 100.0f;
+    lg_vec3_t control_aggressive = lg_koopman_mpc_control(&km, &mpc, &current_pos, &current_vel);
+    ASSERT_TRUE(fabsf(control_aggressive.x) >= fabsf(control.x));
+    ASSERT_TRUE(fabsf(control_aggressive.y) >= fabsf(control.y));
+    
+    free(target_psi);
+    free(X);
+    free(Y);
+    free(km.frequencies);
+    free(km.scales);
+    free(km.K);
+    free(km.P);
+    free(km.Psi);
+    
+    printf("PASS: koopman_mpc_control\n");
+    return 0;
+}
+
+/*============================================================================
+ * Batch Prediction Test
+ *===========================================================================*/
+
+int test_koopman_batch_predict(void) {
+    /* Simple training: identity dynamics (x_next = x) */
+    int n_snapshots = 20;
+    int n_states = 6;
+    float* X = (float*)calloc(n_states * n_snapshots, sizeof(float));
+    float* Y = (float*)calloc(n_states * n_snapshots, sizeof(float));
+    
+    for (int n = 0; n < n_snapshots; n++) {
+        X[0 + n*n_states] = (float)n * 0.1f;
+        X[1 + n*n_states] = (float)n * 0.05f;
+        X[2 + n*n_states] = (float)n * 0.02f;
+        X[3 + n*n_states] = 0.1f;
+        X[4 + n*n_states] = 0.05f;
+        X[5 + n*n_states] = 0.02f;
+        
+        /* Nearly identity: small drift */
+        Y[0 + n*n_states] = X[0 + n*n_states] + 0.01f;
+        Y[1 + n*n_states] = X[1 + n*n_states] + 0.005f;
+        Y[2 + n*n_states] = X[2 + n*n_states] + 0.002f;
+        Y[3 + n*n_states] = X[3 + n*n_states];
+        Y[4 + n*n_states] = X[4 + n*n_states];
+        Y[5 + n*n_states] = X[5 + n*n_states];
+    }
+    
+    lg_koop_data_t data = {X, Y, n_snapshots, n_states};
+    lg_koopman_t km = {0};
+    lg_koopman_init_cheap_compatible(&km, 6, 0.5f);
+    lg_koopman_fit(&km, &data);
+    
+    /* Batch predict on 4 states */
+    float pos_x[4] = {0.5f, 1.0f, 1.5f, 2.0f};
+    float pos_y[4] = {0.25f, 0.5f, 0.75f, 1.0f};
+    float pos_z[4] = {0.1f, 0.2f, 0.3f, 0.4f};
+    float vel_x[4] = {0.1f, 0.1f, 0.1f, 0.1f};
+    float vel_y[4] = {0.05f, 0.05f, 0.05f, 0.05f};
+    float vel_z[4] = {0.02f, 0.02f, 0.02f, 0.02f};
+    
+    lg_vec3_batch_t pos_batch = {pos_x, pos_y, pos_z, 4, 4};
+    lg_vec3_batch_t vel_batch = {vel_x, vel_y, vel_z, 4, 4};
+    float out_x[4], out_y[4], out_z[4];
+    lg_vec3_batch_t pos_out = {out_x, out_y, out_z, 4, 4};
+    
+    lg_koopman_predict_batch_cheap(&km, &pos_batch, &vel_batch, &pos_out, 4);
+    
+    /* With near-identity dynamics, predicted positions should be close to inputs */
+    for (int i = 0; i < 4; i++) {
+        ASSERT_NEAR(out_x[i], pos_x[i] + 0.01f, 0.05f);
+        ASSERT_NEAR(out_y[i], pos_y[i] + 0.005f, 0.05f);
+    }
+    
+    free(X);
+    free(Y);
+    free(km.frequencies);
+    free(km.scales);
+    free(km.K);
+    free(km.P);
+    free(km.Psi);
+    
+    printf("PASS: koopman_batch_predict\n");
+    return 0;
+}
+
+/*============================================================================
  * Main
  *===========================================================================*/
 
@@ -228,6 +388,8 @@ int main(void) {
         {"koopman_observable", test_koopman_observable},
         {"koopman_cheap_init", test_koopman_cheap_init},
         {"koopman_fit_predict", test_koopman_fit_predict},
+        {"koopman_mpc_control", test_koopman_mpc_control},
+        {"koopman_batch_predict", test_koopman_batch_predict},
     };
     
     int num_tests = sizeof(tests) / sizeof(tests[0]);
