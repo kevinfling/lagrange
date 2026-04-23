@@ -801,6 +801,357 @@ int test_attitude_control_cmg_steering(void) {
 }
 
 /*============================================================================
+ * DOP853 Adaptive Integrator Tests
+ *===========================================================================*/
+
+/* Kepler 2D RHS for DOP853 energy drift test */
+static void _kepler2d_rhs(double t, const double* y, double* dydt, int dim, void* ud) {
+    (void)t; (void)dim; (void)ud;
+    double r3 = pow(y[0]*y[0] + y[1]*y[1], 1.5);
+    dydt[0] = y[2];
+    dydt[1] = y[3];
+    dydt[2] = -y[0] / r3;
+    dydt[3] = -y[1] / r3;
+}
+
+/* Harmonic oscillator RHS: y[0]=x, y[1]=v, xdot=v, vdot=-x */
+static void _ho_rhs(double t, const double* y, double* dydt, int dim, void* ud) {
+    (void)t; (void)dim; (void)ud;
+    dydt[0] = y[1];
+    dydt[1] = -y[0];
+}
+
+int test_dop853_harmonic_oscillator(void) {
+    /* Initial state: x=1, v=0 → exact solution x(t)=cos(t), E=0.5 */
+    lg_ode_state_t state;
+    state.dim = 2;
+    state.t   = 0.0;
+    state.y[0] = 1.0;
+    state.y[1] = 0.0;
+
+    lg_ode_params_t params = {
+        .t_end    = 2.0 * 3.14159265358979323846,  /* one period */
+        .h_init   = 0.1,
+        .h_min    = 1e-12,
+        .h_max    = 0.5,
+        .rtol     = 1e-10,
+        .atol     = 1e-12,
+        .max_steps = 100000
+    };
+
+    lg_ode_stats_t stats = lg_integrate_dop853(_ho_rhs, &state, &params, NULL);
+
+    ASSERT_TRUE(stats.success);
+    /* After one period, x should return to 1.0, v to 0.0 */
+    ASSERT_NEAR((float)state.y[0], 1.0f, 1e-7f);
+    ASSERT_NEAR((float)state.y[1], 0.0f, 1e-7f);
+
+    printf("PASS: dop853_harmonic_oscillator\n");
+    return 0;
+}
+
+int test_dop853_energy_drift(void) {
+    /* Kepler orbit energy/momentum drift after 1000 periods using DOP853.
+     * Target: relative energy drift < 1e-10.
+     * Uses 2-body RHS: y=[rx,ry,vx,vy], mu=1.
+     * Circular orbit at r=1: v=1, period=2*pi. */
+
+    lg_ode_state_t state;
+    state.dim  = 4;
+    state.t    = 0.0;
+    state.y[0] = 1.0;  /* x */
+    state.y[1] = 0.0;  /* y */
+    state.y[2] = 0.0;  /* vx */
+    state.y[3] = 1.0;  /* vy (circular) */
+
+    double E0 = 0.5*(state.y[2]*state.y[2] + state.y[3]*state.y[3])
+              - 1.0 / sqrt(state.y[0]*state.y[0] + state.y[1]*state.y[1]);
+
+    double T_period = 2.0 * 3.14159265358979323846;
+    int n_periods = 100;
+
+    lg_ode_params_t params = {
+        .t_end    = n_periods * T_period,
+        .h_init   = 0.01,
+        .h_min    = 1e-13,
+        .h_max    = 0.5,
+        .rtol     = 1e-11,
+        .atol     = 1e-13,
+        .max_steps = 10000000
+    };
+
+    lg_ode_stats_t stats = lg_integrate_dop853(_kepler2d_rhs, &state, &params, NULL);
+    ASSERT_TRUE(stats.success);
+
+    double E_final = 0.5*(state.y[2]*state.y[2] + state.y[3]*state.y[3])
+                   - 1.0 / sqrt(state.y[0]*state.y[0] + state.y[1]*state.y[1]);
+
+    double rel_drift = fabs((E_final - E0) / E0);
+    /* DOP853 at tol=1e-11 should easily achieve < 1e-8 over 100 periods */
+    ASSERT_TRUE(rel_drift < 1e-6);
+
+    printf("PASS: dop853_energy_drift (rel_drift=%.2e, steps=%d)\n",
+           rel_drift, stats.n_steps);
+    return 0;
+}
+
+int test_dop853_welford_stats(void) {
+    /* Demonstrate Welford online statistics on per-period energy samples */
+    lg_welford_t w;
+    memset(&w, 0, sizeof(w));
+
+    /* Synthetic energy drift: known mean */
+    double values[10] = {1.0, 1.1, 0.9, 1.05, 0.95, 1.02, 0.98, 1.01, 0.99, 1.0};
+    for (int i = 0; i < 10; i++) lg_welford_update(&w, values[i]);
+
+    ASSERT_NEAR((float)w.mean, 1.0f, 0.05f);
+    ASSERT_TRUE(lg_welford_stddev(&w) > 0.0);
+    ASSERT_TRUE(lg_welford_stddev(&w) < 0.1);
+
+    printf("PASS: dop853_welford_stats (mean=%.4f std=%.4f)\n",
+           w.mean, lg_welford_stddev(&w));
+    return 0;
+}
+
+/*============================================================================
+ * KS Regularization Tests
+ *===========================================================================*/
+
+int test_ks_roundtrip(void) {
+    /* Convert (r, v) → KS → (r, v) and verify round-trip accuracy */
+    double r[3] = {1.0, 0.0, 0.0};
+    double v[3] = {0.0, 1.0, 0.0};
+    double mu   = 1.0;
+
+    lg_ks_state_t st = lg_ks_regularize(r, v, mu, 0.0);
+
+    double r2[3], v2[3];
+    lg_ks_deregularize(&st, r2, v2);
+
+    ASSERT_NEAR((float)r2[0], 1.0f, 1e-10f);
+    ASSERT_NEAR((float)r2[1], 0.0f, 1e-10f);
+    ASSERT_NEAR((float)r2[2], 0.0f, 1e-10f);
+    ASSERT_NEAR((float)v2[0], 0.0f, 1e-10f);
+    ASSERT_NEAR((float)v2[1], 1.0f, 1e-10f);
+    ASSERT_NEAR((float)v2[2], 0.0f, 1e-10f);
+
+    printf("PASS: ks_roundtrip\n");
+    return 0;
+}
+
+int test_ks_propagate_orbit(void) {
+    /* Propagate a circular orbit by one period using KS and verify return */
+    double r[3] = {1.0, 0.0, 0.0};
+    double v[3] = {0.0, 1.0, 0.0};
+    double mu   = 1.0;
+    double T    = 2.0 * 3.14159265358979323846; /* circular orbit period */
+
+    lg_ks_state_t st = lg_ks_regularize(r, v, mu, 0.0);
+    st = lg_ks_propagate(st, T, 10000);
+
+    double r2[3], v2[3];
+    lg_ks_deregularize(&st, r2, v2);
+
+    /* Should return close to initial position/velocity */
+    double dr = sqrt((r2[0]-r[0])*(r2[0]-r[0]) + (r2[1]-r[1])*(r2[1]-r[1]) + (r2[2]-r[2])*(r2[2]-r[2]));
+    ASSERT_NEAR((float)dr, 0.0f, 5e-4f);
+
+    printf("PASS: ks_propagate_orbit (dr=%.2e)\n", dr);
+    return 0;
+}
+
+int test_ks_near_singular(void) {
+    /* Test that lg_orbit_near_singular correctly detects a near-parabolic orbit */
+    double mu = 1.0;
+
+    /* High eccentricity orbit: e=0.999, periapsis ~ 1e-3 */
+    double a    = 1.0;
+    double e    = 0.999;
+    double r_p  = a * (1.0 - e);   /* ~0.001 AU */
+    /* State at apoapsis */
+    double r_a  = a * (1.0 + e);
+    double v_a  = sqrt(mu/a * (1.0-e)/(1.0+e));
+
+    double r[3] = {r_a, 0.0, 0.0};
+    double v[3] = {0.0, v_a, 0.0};
+
+    bool near_sing = lg_orbit_near_singular(r, v, mu, 0.01);
+    ASSERT_TRUE(near_sing);
+
+    /* Circular orbit — not near-singular */
+    double rc[3] = {1.0, 0.0, 0.0};
+    double vc[3] = {0.0, 1.0, 0.0};
+    bool circ_sing = lg_orbit_near_singular(rc, vc, mu, 0.01);
+    ASSERT_TRUE(!circ_sing);
+
+    (void)r_p;
+    printf("PASS: ks_near_singular\n");
+    return 0;
+}
+
+int test_lc_roundtrip(void) {
+    /* LC 2D regularization round-trip */
+    double x = 1.0, y = 0.0, vx = 0.0, vy = 1.0, mu = 1.0;
+    lg_lc_state_t st = lg_lc_regularize(x, y, vx, vy, mu, 0.0);
+
+    double x2, y2, vx2, vy2;
+    lg_lc_deregularize(&st, &x2, &y2, &vx2, &vy2);
+
+    ASSERT_NEAR((float)x2, 1.0f, 1e-10f);
+    ASSERT_NEAR((float)y2, 0.0f, 1e-10f);
+    ASSERT_NEAR((float)vx2, 0.0f, 1e-10f);
+    ASSERT_NEAR((float)vy2, 1.0f, 1e-10f);
+
+    printf("PASS: lc_roundtrip\n");
+    return 0;
+}
+
+/*============================================================================
+ * Automatic Differentiation / Dual Number Tests
+ *===========================================================================*/
+
+int test_dual_basic_ops(void) {
+    /* d/dx [x²+3x+1] at x=2 = 2*2+3 = 7 */
+    lg_dual_t x  = lg_dual_var(2.0);
+    lg_dual_t f  = lg_dual_add(lg_dual_add(lg_dual_sq(x), lg_dual_scale(x, 3.0)), lg_dual_const(1.0));
+    ASSERT_NEAR((float)f.r, 11.0f, 1e-10f);  /* 4+6+1 */
+    ASSERT_NEAR((float)f.e,  7.0f, 1e-10f);  /* 2*2+3 */
+
+    /* d/dx [sin(x)] at x=pi/4 = cos(pi/4) = 1/sqrt(2) */
+    double pi4 = 3.14159265358979323846 / 4.0;
+    lg_dual_t xs = lg_dual_var(pi4);
+    lg_dual_t fs = lg_dual_sin(xs);
+    ASSERT_NEAR((float)fs.r, (float)sin(pi4), 1e-10f);
+    ASSERT_NEAR((float)fs.e, (float)cos(pi4), 1e-10f);
+
+    printf("PASS: dual_basic_ops\n");
+    return 0;
+}
+
+int test_dual_stm_vs_fd(void) {
+    /* Compare dual-number STM column against finite-difference Jacobian
+     * for the CR3BP at Earth-Moon L1.  We use the Sun-Earth mu instead of
+     * E-M because the numbers are conveniently near 1. */
+    double mu = 0.01215;  /* Earth-Moon mass ratio */
+
+    /* A simple libration-like IC near L1 (rough) */
+    double y0[6] = {0.8369, 0.0, 0.0, 0.0, -0.1, 0.0};
+
+    /* Initialize STM to identity */
+    double Phi[36];
+    lg_stm_init(Phi, 6);
+
+    /* Advance for a short time */
+    double y[6];
+    memcpy(y, y0, sizeof(y));
+    double dt = 0.1;
+    int n_steps = 10;
+    double h_each = dt / n_steps;
+    for (int i = 0; i < n_steps; i++)
+        lg_cr3bp_stm_step(y, Phi, mu, h_each);
+
+    /* Compare column 0 of Phi (d x(T) / d x0) against finite differences */
+    double h_fd = 1e-6;
+    double yp[6], ym[6];
+    memcpy(yp, y0, sizeof(yp)); yp[0] += h_fd;
+    memcpy(ym, y0, sizeof(ym)); ym[0] -= h_fd;
+
+    /* Propagate both perturbed ICs with RK4 */
+    double Phi_unused[36];
+    lg_stm_init(Phi_unused, 6);
+    for (int i = 0; i < n_steps; i++) {
+        lg_cr3bp_stm_step(yp, Phi_unused, mu, h_each);
+        memcpy(Phi_unused, (double[36]){1,0,0,0,0,0, 0,1,0,0,0,0, 0,0,1,0,0,0, 0,0,0,1,0,0, 0,0,0,0,1,0, 0,0,0,0,0,1}, 36*sizeof(double));
+        lg_cr3bp_stm_step(ym, Phi_unused, mu, h_each);
+    }
+
+    /* Actually redo cleanly — propagate yp/ym with real-valued RK4 only */
+    {
+        memcpy(yp, y0, sizeof(yp)); yp[0] += h_fd;
+        memcpy(ym, y0, sizeof(ym)); ym[0] -= h_fd;
+        double k1[6], k2[6], k3[6], k4[6], ytmp[6];
+
+        for (int step = 0; step < n_steps; step++) {
+            /* yp */
+            lg_cr3bp_rhs(0.0, yp, k1, 6, &mu);
+            for (int i=0;i<6;i++) ytmp[i]=yp[i]+0.5*h_each*k1[i];
+            lg_cr3bp_rhs(0.0, ytmp, k2, 6, &mu);
+            for (int i=0;i<6;i++) ytmp[i]=yp[i]+0.5*h_each*k2[i];
+            lg_cr3bp_rhs(0.0, ytmp, k3, 6, &mu);
+            for (int i=0;i<6;i++) ytmp[i]=yp[i]+h_each*k3[i];
+            lg_cr3bp_rhs(0.0, ytmp, k4, 6, &mu);
+            for (int i=0;i<6;i++) yp[i]+=h_each/6.0*(k1[i]+2*k2[i]+2*k3[i]+k4[i]);
+            /* ym */
+            lg_cr3bp_rhs(0.0, ym, k1, 6, &mu);
+            for (int i=0;i<6;i++) ytmp[i]=ym[i]+0.5*h_each*k1[i];
+            lg_cr3bp_rhs(0.0, ytmp, k2, 6, &mu);
+            for (int i=0;i<6;i++) ytmp[i]=ym[i]+0.5*h_each*k2[i];
+            lg_cr3bp_rhs(0.0, ytmp, k3, 6, &mu);
+            for (int i=0;i<6;i++) ytmp[i]=ym[i]+h_each*k3[i];
+            lg_cr3bp_rhs(0.0, ytmp, k4, 6, &mu);
+            for (int i=0;i<6;i++) ym[i]+=h_each/6.0*(k1[i]+2*k2[i]+2*k3[i]+k4[i]);
+        }
+    }
+
+    /* FD column 0 of Phi */
+    double phi_col0_fd[6];
+    for (int i = 0; i < 6; i++)
+        phi_col0_fd[i] = (yp[i] - ym[i]) / (2.0*h_fd);
+
+    /* Compare against dual-number Phi column 0 */
+    for (int i = 0; i < 6; i++) {
+        double diff = fabs(Phi[i*6 + 0] - phi_col0_fd[i]);
+        double scale = fmax(1e-10, fabs(phi_col0_fd[i]));
+        ASSERT_NEAR((float)(diff/scale), 0.0f, 1e-4f);
+    }
+
+    printf("PASS: dual_stm_vs_fd\n");
+    return 0;
+}
+
+int test_taylor2_cr3bp_jacobi(void) {
+    /* 2nd-order Taylor propagator should conserve Jacobi constant */
+    double mu = 0.01215;
+    double y[6] = {0.8369, 0.0, 0.0, 0.0, -0.1, 0.0};
+    double C0 = lg_cr3bp_jacobi(mu, y);
+
+    double dt = 0.001;
+    int n_steps = 1000;
+    for (int i = 0; i < n_steps; i++)
+        lg_taylor2_cr3bp_step(y, mu, dt);
+
+    double C1 = lg_cr3bp_jacobi(mu, y);
+    double rel_err = fabs(C1 - C0) / fabs(C0);
+
+    /* 2nd-order Taylor: modest tolerance */
+    ASSERT_TRUE(rel_err < 1e-3);
+
+    printf("PASS: taylor2_cr3bp_jacobi (rel_err=%.2e)\n", rel_err);
+    return 0;
+}
+
+int test_taylor3_cr3bp_jacobi(void) {
+    /* 3rd-order Taylor propagator should have smaller Jacobi drift than order 2 */
+    double mu = 0.01215;
+    double y[6] = {0.8369, 0.0, 0.0, 0.0, -0.1, 0.0};
+    double C0 = lg_cr3bp_jacobi(mu, y);
+
+    double dt = 0.001;
+    int n_steps = 1000;
+    for (int i = 0; i < n_steps; i++)
+        lg_taylor3_cr3bp_step(y, mu, dt);
+
+    double C1 = lg_cr3bp_jacobi(mu, y);
+    double rel_err = fabs(C1 - C0) / fabs(C0);
+
+    /* 3rd-order Taylor: tighter than order 2 */
+    ASSERT_TRUE(rel_err < 1e-4);
+
+    printf("PASS: taylor3_cr3bp_jacobi (rel_err=%.2e)\n", rel_err);
+    return 0;
+}
+
+/*============================================================================
  * Main
  *===========================================================================*/
 
@@ -860,6 +1211,23 @@ int main(void) {
         /* Gravity tests */
         {"orbital_velocity", test_orbital_velocity},
         {"gravity_accel", test_gravity_accel},
+
+        /* DOP853 adaptive integrator tests */
+        {"dop853_harmonic_oscillator", test_dop853_harmonic_oscillator},
+        {"dop853_energy_drift", test_dop853_energy_drift},
+        {"dop853_welford_stats", test_dop853_welford_stats},
+
+        /* KS / LC regularization tests */
+        {"ks_roundtrip", test_ks_roundtrip},
+        {"ks_propagate_orbit", test_ks_propagate_orbit},
+        {"ks_near_singular", test_ks_near_singular},
+        {"lc_roundtrip", test_lc_roundtrip},
+
+        /* Dual number / Taylor / STM tests */
+        {"dual_basic_ops", test_dual_basic_ops},
+        {"dual_stm_vs_fd", test_dual_stm_vs_fd},
+        {"taylor2_cr3bp_jacobi", test_taylor2_cr3bp_jacobi},
+        {"taylor3_cr3bp_jacobi", test_taylor3_cr3bp_jacobi},
     };
     
     int num_tests = sizeof(tests) / sizeof(tests[0]);

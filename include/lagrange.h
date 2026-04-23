@@ -50,6 +50,9 @@ extern "C" {
 #include "lagrange/attitude_control.h"
 #include "lagrange/koopman.h"
 #include "lagrange/wavelet.h"
+#include "lagrange/adaptive_integrator.h"
+#include "lagrange/regularization.h"
+#include "lagrange/autodiff.h"
 
 /*============================================================================
  * Implementation
