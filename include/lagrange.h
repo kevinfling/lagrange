@@ -46,6 +46,7 @@ extern "C" {
 #include "lagrange/gravity.h"
 #include "lagrange/world.h"
 #include "lagrange/sim.h"
+#include "lagrange/spatial_index.h"
 #include "lagrange/transfer.h"
 #include "lagrange/attitude_control.h"
 #include "lagrange/koopman.h"

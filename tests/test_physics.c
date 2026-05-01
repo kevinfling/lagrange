@@ -344,6 +344,165 @@ int test_transform_interpolation(void) {
     return 0;
 }
 
+static int g_query_count = 0;
+static int g_query_dynamic_count = 0;
+static int g_query_static_count = 0;
+
+static void count_body_callback(lg_world_t* world, lg_entity_t entity, lg_body_t* body, void* user_data) {
+    (void)world;
+    (void)entity;
+    (void)body;
+    (void)user_data;
+    g_query_count++;
+}
+
+static void count_dynamic_callback(lg_world_t* world, lg_entity_t entity, lg_body_t* body, void* user_data) {
+    (void)world;
+    (void)entity;
+    (void)body;
+    (void)user_data;
+    g_query_dynamic_count++;
+}
+
+static void count_static_callback(lg_world_t* world, lg_entity_t entity, lg_body_t* body, void* user_data) {
+    (void)world;
+    (void)entity;
+    (void)body;
+    (void)user_data;
+    g_query_static_count++;
+}
+
+int test_component_queries(void) {
+    lg_world_t* world = lg_world_create(NULL);
+    
+    /* Create mixed entity types */
+    lg_entity_t e1 = lg_entity_create(world);
+    lg_entity_t e2 = lg_entity_create(world);
+    lg_entity_t e3 = lg_entity_create(world);
+    
+    (void)e1; /* e1 is dynamic by default, counted via callback */
+    
+    /* e1: dynamic (default) */
+    /* e2: static */
+    lg_body_t static_body = lg_body_static();
+    lg_set_body(world, e2, &static_body);
+    
+    /* e3: kinematic */
+    lg_body_t kin_body = lg_body_kinematic();
+    lg_set_body(world, e3, &kin_body);
+    
+    /* Test lg_world_for_each_body (all entities have bodies) */
+    g_query_count = 0;
+    lg_world_for_each_body(world, count_body_callback, NULL);
+    ASSERT_TRUE(g_query_count == 3);
+    
+    /* Test lg_world_for_each_dynamic */
+    g_query_dynamic_count = 0;
+    lg_world_for_each_dynamic(world, count_dynamic_callback, NULL);
+    ASSERT_TRUE(g_query_dynamic_count == 1); /* Only e1 */
+    
+    /* Test lg_world_for_each_static */
+    g_query_static_count = 0;
+    lg_world_for_each_static(world, count_static_callback, NULL);
+    ASSERT_TRUE(g_query_static_count == 1); /* Only e2 */
+    
+    /* Test kinematic */
+    g_query_count = 0;
+    lg_world_for_each_kinematic(world, count_body_callback, NULL);
+    ASSERT_TRUE(g_query_count == 1); /* Only e3 */
+    
+    /* Test direct component access (no lookup overhead) */
+    g_query_count = 0;
+    lg_world_for_each_transform(world, 
+        (lg_transform_callback_t)count_body_callback, NULL);
+    ASSERT_TRUE(g_query_count == 3);
+    
+    g_query_count = 0;
+    lg_world_for_each_collider(world,
+        (lg_collider_callback_t)count_body_callback, NULL);
+    ASSERT_TRUE(g_query_count == 3);
+    
+    lg_world_destroy(world);
+    
+    printf("PASS: component_queries\n");
+    return 0;
+}
+
+int test_bvh_broad_phase(void) {
+    lg_world_t* world = lg_world_create(NULL);
+    world->use_gravity = false;
+    
+    /* Create 40 spheres: some overlapping, some not */
+    /* Use a grid with spacing 1.0 and radius 0.6 -> neighbors overlap */
+    for (int i = 0; i < 40; i++) {
+        lg_entity_t e = lg_entity_create(world);
+        float x = (float)(i % 8) * 1.0f;
+        float y = (float)(i / 8) * 1.0f;
+        lg_set_position(world, e, lg_vec3(x, y, 0.0f));
+        lg_collider_t c = lg_collider_sphere(0.6f);
+        lg_set_collider(world, e, &c);
+    }
+    
+    lg_contact_t brute_contacts[256];
+    int brute_count = 0;
+    lg_broad_phase(world, brute_contacts, 256, &brute_count);
+    
+    lg_contact_t bvh_contacts[256];
+    int bvh_count = 0;
+    lg_broad_phase_bvh(world, bvh_contacts, 256, &bvh_count);
+    
+    ASSERT_TRUE(bvh_count == brute_count);
+    ASSERT_TRUE(bvh_count > 0); /* Should have found some overlaps */
+    
+    /* Verify that the same entity pairs are found (order may differ) */
+    /* For simplicity, just check counts match - the BVH and brute force
+     * should produce identical narrow-phase results. */
+    
+    lg_world_destroy(world);
+    
+    printf("PASS: bvh_broad_phase\n");
+    return 0;
+}
+
+static int g_aabb_query_count = 0;
+static void aabb_query_callback(lg_world_t* world, lg_entity_t entity, void* user_data) {
+    (void)world;
+    (void)entity;
+    (void)user_data;
+    g_aabb_query_count++;
+}
+
+int test_world_query_aabb(void) {
+    lg_world_t* world = lg_world_create(NULL);
+    
+    /* Create entities at known positions */
+    lg_entity_t e1 = lg_entity_create(world);
+    lg_entity_t e2 = lg_entity_create(world);
+    lg_entity_t e3 = lg_entity_create(world);
+    
+    lg_set_position(world, e1, lg_vec3(0.0f, 0.0f, 0.0f));
+    lg_set_position(world, e2, lg_vec3(5.0f, 0.0f, 0.0f));
+    lg_set_position(world, e3, lg_vec3(10.0f, 0.0f, 0.0f));
+    
+    lg_collider_t c = lg_collider_sphere(1.0f);
+    lg_set_collider(world, e1, &c);
+    lg_set_collider(world, e2, &c);
+    lg_set_collider(world, e3, &c);
+    
+    /* Query AABB that covers only e1 and e2 */
+    float qmin[3] = {-2.0f, -2.0f, -2.0f};
+    float qmax[3] = {7.0f, 2.0f, 2.0f};
+    
+    g_aabb_query_count = 0;
+    lg_world_query_aabb(world, qmin, qmax, aabb_query_callback, NULL);
+    ASSERT_TRUE(g_aabb_query_count == 2);
+    
+    lg_world_destroy(world);
+    
+    printf("PASS: world_query_aabb\n");
+    return 0;
+}
+
 /*============================================================================
  * Integration Tests
  *===========================================================================*/
@@ -1188,6 +1347,9 @@ int main(void) {
         {"entity_recycling", test_entity_recycling},
         {"collision_callback", test_collision_callback},
         {"transform_interpolation", test_transform_interpolation},
+        {"component_queries", test_component_queries},
+        {"bvh_broad_phase", test_bvh_broad_phase},
+        {"world_query_aabb", test_world_query_aabb},
         
         /* Integration tests */
         {"integration_euler", test_integration_euler},

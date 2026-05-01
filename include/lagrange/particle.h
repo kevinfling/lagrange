@@ -38,6 +38,11 @@ typedef uint64_t lg_morton_t;
 
 /* Compute 3D Morton code from normalized position [0,1]^3 */
 static inline lg_morton_t lg_morton_encode(float x, float y, float z) {
+    /* Clamp to [0,1] to prevent overflow/wrap in quantization */
+    x = fminf(fmaxf(x, 0.0f), 1.0f);
+    y = fminf(fmaxf(y, 0.0f), 1.0f);
+    z = fminf(fmaxf(z, 0.0f), 1.0f);
+
     /* Quantize to 21 bits per dimension (63 total in uint64_t) */
     uint32_t ix = (uint32_t)(x * 2097151.0f); /* 2^21 - 1 */
     uint32_t iy = (uint32_t)(y * 2097151.0f);

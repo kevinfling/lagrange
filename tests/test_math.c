@@ -340,6 +340,32 @@ int test_simd_batch_operations(void) {
     return 0;
 }
 
+int test_morton_clamp(void) {
+    /* Normal case: values inside [0,1] */
+    lg_morton_t m1 = lg_morton_encode(0.5f, 0.5f, 0.5f);
+    ASSERT_TRUE(m1 > 0);
+    
+    /* Edge cases: exactly 0 and 1 */
+    lg_morton_t m0 = lg_morton_encode(0.0f, 0.0f, 0.0f);
+    lg_morton_t m_max = lg_morton_encode(1.0f, 1.0f, 1.0f);
+    ASSERT_TRUE(m_max > m0);
+    
+    /* Clamping: values outside [0,1] should not overflow */
+    lg_morton_t m_neg = lg_morton_encode(-1.0f, -0.5f, -10.0f);
+    ASSERT_TRUE(m_neg == m0); /* Should clamp to 0 */
+    
+    lg_morton_t m_over = lg_morton_encode(2.0f, 1.5f, 100.0f);
+    ASSERT_TRUE(m_over == m_max); /* Should clamp to 1 */
+    
+    /* Mixed: some in, some out */
+    lg_morton_t m_mix = lg_morton_encode(-0.5f, 0.5f, 2.0f);
+    lg_morton_t m_expected = lg_morton_encode(0.0f, 0.5f, 1.0f);
+    ASSERT_TRUE(m_mix == m_expected);
+    
+    printf("PASS: morton_clamp\n");
+    return 0;
+}
+
 /*============================================================================
  * Main
  *===========================================================================*/
@@ -370,6 +396,7 @@ int main(void) {
         {"mat3_mul_vec3", test_mat3_mul_vec3},
         {"quat_slerp_edge_cases", test_quat_slerp_edge_cases},
         {"simd_batch_operations", test_simd_batch_operations},
+        {"morton_clamp", test_morton_clamp},
     };
     
     int num_tests = sizeof(tests) / sizeof(tests[0]);

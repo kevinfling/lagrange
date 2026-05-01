@@ -553,6 +553,158 @@ static inline void lg_resolve_contact(lg_world_t* world, const lg_contact_t* con
 }
 
 /*============================================================================
+ * Narrow Phase (single pair)
+ *===========================================================================*/
+
+static inline bool lg_narrow_phase(lg_storage_t* s, size_t i, size_t j, lg_contact_t* contact) {
+    lg_collider_t* ca = &s->colliders[i];
+    lg_collider_t* cb = &s->colliders[j];
+    lg_transform_t* ta = &s->transforms[i];
+    lg_transform_t* tb = &s->transforms[j];
+    
+    /* Skip trigger-only pairs for now */
+    if (ca->is_trigger || cb->is_trigger) return false;
+    
+    contact->entity_a = s->entities[i];
+    contact->entity_b = s->entities[j];
+    
+    /* Material combination */
+    lg_material_t* ma = &s->materials[i];
+    lg_material_t* mb = &s->materials[j];
+    contact->restitution = fminf(ma->restitution, mb->restitution);
+    contact->friction = sqrtf(ma->friction * mb->friction);
+    
+    bool collided = false;
+    
+    /* Sphere-sphere */
+    if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_SPHERE) {
+        collided = lg_collide_spheres(
+            ta->position, ca->sphere.radius + ca->margin,
+            tb->position, cb->sphere.radius + cb->margin,
+            contact
+        );
+    }
+    /* Sphere-plane (plane-sphere handled by reversing) */
+    else if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_PLANE) {
+        collided = lg_collide_sphere_plane(
+            ta->position, ca->sphere.radius + ca->margin,
+            fabsf(tb->rotation.x) < 1e-6f && fabsf(tb->rotation.z) < 1e-6f ? 
+                lg_vec3(0, 1, 0) : lg_quat_rotate(tb->rotation, lg_vec3_up()),
+            cb->plane.distance,
+            contact
+        );
+    }
+    /* Plane-sphere (swap entities for consistent normal direction) */
+    else if (ca->type == LG_SHAPE_PLANE && cb->type == LG_SHAPE_SPHERE) {
+        collided = lg_collide_sphere_plane(
+            tb->position, cb->sphere.radius + cb->margin,
+            fabsf(ta->rotation.x) < 1e-6f && fabsf(ta->rotation.z) < 1e-6f ? 
+                lg_vec3(0, 1, 0) : lg_quat_rotate(ta->rotation, lg_vec3_up()),
+            ca->plane.distance,
+            contact
+        );
+        contact->entity_a = s->entities[j];  /* Sphere becomes A */
+        contact->entity_b = s->entities[i];  /* Plane becomes B */
+    }
+    /* Box-plane */
+    else if (ca->type == LG_SHAPE_BOX && cb->type == LG_SHAPE_PLANE) {
+        collided = lg_collide_box_plane(
+            ta->position, ca->box.half_extents,
+            cb->plane.normal, cb->plane.distance,
+            contact
+        );
+    }
+    /* Plane-box (swap entities) */
+    else if (ca->type == LG_SHAPE_PLANE && cb->type == LG_SHAPE_BOX) {
+        contact->entity_a = s->entities[j];  /* Swap: box becomes A */
+        contact->entity_b = s->entities[i];  /* Plane becomes B */
+        collided = lg_collide_box_plane(
+            tb->position, cb->box.half_extents,
+            ca->plane.normal, ca->plane.distance,
+            contact
+        );
+    }
+    /* Sphere-box */
+    else if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_BOX) {
+        collided = lg_collide_sphere_box(
+            ta->position, ca->sphere.radius + ca->margin,
+            tb->position, cb->box.half_extents,
+            contact
+        );
+    }
+    /* Box-sphere (swap entities) */
+    else if (ca->type == LG_SHAPE_BOX && cb->type == LG_SHAPE_SPHERE) {
+        contact->entity_a = s->entities[j];  /* Swap: sphere becomes A */
+        contact->entity_b = s->entities[i];  /* Box becomes B */
+        collided = lg_collide_sphere_box(
+            tb->position, cb->sphere.radius + cb->margin,
+            ta->position, ca->box.half_extents,
+            contact
+        );
+    }
+    /* Box-box */
+    else if (ca->type == LG_SHAPE_BOX && cb->type == LG_SHAPE_BOX) {
+        collided = lg_collide_box_box(
+            ta->position, ca->box.half_extents,
+            tb->position, cb->box.half_extents,
+            contact
+        );
+    }
+    /* Sphere-capsule */
+    else if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_CAPSULE) {
+        collided = lg_collide_sphere_capsule(
+            ta->position, ca->sphere.radius + ca->margin,
+            tb->position, lg_quat_rotate(tb->rotation, lg_vec3_up()),
+            cb->capsule.half_height, cb->capsule.radius + cb->margin,
+            contact
+        );
+    }
+    /* Capsule-sphere (swap entities) */
+    else if (ca->type == LG_SHAPE_CAPSULE && cb->type == LG_SHAPE_SPHERE) {
+        contact->entity_a = s->entities[j];  /* Swap: sphere becomes A */
+        contact->entity_b = s->entities[i];  /* Capsule becomes B */
+        collided = lg_collide_sphere_capsule(
+            tb->position, cb->sphere.radius + cb->margin,
+            ta->position, lg_quat_rotate(ta->rotation, lg_vec3_up()),
+            ca->capsule.half_height, ca->capsule.radius + ca->margin,
+            contact
+        );
+    }
+    /* Capsule-capsule */
+    else if (ca->type == LG_SHAPE_CAPSULE && cb->type == LG_SHAPE_CAPSULE) {
+        collided = lg_collide_capsule_capsule(
+            ta->position, lg_quat_rotate(ta->rotation, lg_vec3_up()),
+            ca->capsule.half_height, ca->capsule.radius + ca->margin,
+            tb->position, lg_quat_rotate(tb->rotation, lg_vec3_up()),
+            cb->capsule.half_height, cb->capsule.radius + cb->margin,
+            contact
+        );
+    }
+    /* Sphere-cylinder */
+    else if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_CYLINDER) {
+        collided = lg_collide_sphere_cylinder(
+            ta->position, ca->sphere.radius + ca->margin,
+            tb->position, lg_quat_rotate(tb->rotation, lg_vec3_up()),
+            cb->cylinder.half_height, cb->cylinder.radius + cb->margin,
+            contact
+        );
+    }
+    /* Cylinder-sphere (swap) */
+    else if (ca->type == LG_SHAPE_CYLINDER && cb->type == LG_SHAPE_SPHERE) {
+        contact->entity_a = s->entities[j];
+        contact->entity_b = s->entities[i];
+        collided = lg_collide_sphere_cylinder(
+            tb->position, cb->sphere.radius + cb->margin,
+            ta->position, lg_quat_rotate(ta->rotation, lg_vec3_up()),
+            ca->cylinder.half_height, ca->cylinder.radius + ca->margin,
+            contact
+        );
+    }
+    
+    return collided;
+}
+
+/*============================================================================
  * Broad Phase (Simple Brute Force)
  *===========================================================================*/
 
@@ -561,172 +713,16 @@ static inline void lg_broad_phase(lg_world_t* world, lg_contact_t* contacts, int
     
     lg_storage_t* s = &world->storage;
     
-
-    
     for (size_t i = 0; i < s->count && *out_count < max_contacts; i++) {
         for (size_t j = i + 1; j < s->count && *out_count < max_contacts; j++) {
-            lg_collider_t* ca = &s->colliders[i];
-            lg_collider_t* cb = &s->colliders[j];
-            lg_transform_t* ta = &s->transforms[i];
-            lg_transform_t* tb = &s->transforms[j];
-            
-            /* Skip trigger-only pairs for now */
-            if (ca->is_trigger || cb->is_trigger) continue;
-            
             lg_contact_t contact = {0};
-            contact.entity_a = s->entities[i];
-            contact.entity_b = s->entities[j];
-            
-            /* Material combination */
-            lg_material_t* ma = &s->materials[i];
-            lg_material_t* mb = &s->materials[j];
-            contact.restitution = fminf(ma->restitution, mb->restitution);
-            contact.friction = sqrtf(ma->friction * mb->friction);
-            
-            bool collided = false;
-            
-            /* Sphere-sphere */
-            if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_SPHERE) {
-                collided = lg_collide_spheres(
-                    ta->position, ca->sphere.radius + ca->margin,
-                    tb->position, cb->sphere.radius + cb->margin,
-                    &contact
-                );
-            }
-            /* Sphere-plane (plane-sphere handled by reversing) */
-            else if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_PLANE) {
-                collided = lg_collide_sphere_plane(
-                    ta->position, ca->sphere.radius + ca->margin,
-                    fabsf(tb->rotation.x) < 1e-6f && fabsf(tb->rotation.z) < 1e-6f ? 
-                        lg_vec3(0, 1, 0) : lg_quat_rotate(tb->rotation, lg_vec3_up()),
-                    cb->plane.distance,
-                    &contact
-                );
-            }
-            /* Plane-sphere (swap entities for consistent normal direction) */
-            else if (ca->type == LG_SHAPE_PLANE && cb->type == LG_SHAPE_SPHERE) {
-                collided = lg_collide_sphere_plane(
-                    tb->position, cb->sphere.radius + cb->margin,
-                    fabsf(ta->rotation.x) < 1e-6f && fabsf(ta->rotation.z) < 1e-6f ? 
-                        lg_vec3(0, 1, 0) : lg_quat_rotate(ta->rotation, lg_vec3_up()),
-                    ca->plane.distance,
-                    &contact
-                );
-                /* The contact now has sphere as A, plane as B, normal points from sphere to plane (up)
-                 * We want: A = sphere (dynamic), B = plane (static), normal from B to A (up)
-                 * The collision function sets normal from sphere to plane (up), which is what we want!
-                 * Just need to swap entity IDs.
-                 */
-                contact.entity_a = s->entities[j];  /* Sphere becomes A */
-                contact.entity_b = s->entities[i];  /* Plane becomes B */
-            }
-            /* Box-plane */
-            else if (ca->type == LG_SHAPE_BOX && cb->type == LG_SHAPE_PLANE) {
-                collided = lg_collide_box_plane(
-                    ta->position, ca->box.half_extents,
-                    cb->plane.normal, cb->plane.distance,
-                    &contact
-                );
-
-            }
-            /* Plane-box (swap entities) */
-            else if (ca->type == LG_SHAPE_PLANE && cb->type == LG_SHAPE_BOX) {
-                contact.entity_a = s->entities[j];  /* Swap: box becomes A */
-                contact.entity_b = s->entities[i];  /* Plane becomes B */
-                collided = lg_collide_box_plane(
-                    tb->position, cb->box.half_extents,
-                    ca->plane.normal, ca->plane.distance,
-                    &contact
-                );
-                /* Collision function returns normal = plane_normal (points from plane toward box)
-                 * With A=box, B=plane, we want normal from B to A, which is what we have.
-                 * No need to flip.
-                 */
-
-            }
-            /* Sphere-box */
-            else if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_BOX) {
-                collided = lg_collide_sphere_box(
-                    ta->position, ca->sphere.radius + ca->margin,
-                    tb->position, cb->box.half_extents,
-                    &contact
-                );
-            }
-            /* Box-sphere (swap entities) */
-            else if (ca->type == LG_SHAPE_BOX && cb->type == LG_SHAPE_SPHERE) {
-                contact.entity_a = s->entities[j];  /* Swap: sphere becomes A */
-                contact.entity_b = s->entities[i];  /* Box becomes B */
-                collided = lg_collide_sphere_box(
-                    tb->position, cb->sphere.radius + cb->margin,
-                    ta->position, ca->box.half_extents,
-                    &contact
-                );
-            }
-            /* Box-box */
-            else if (ca->type == LG_SHAPE_BOX && cb->type == LG_SHAPE_BOX) {
-                collided = lg_collide_box_box(
-                    ta->position, ca->box.half_extents,
-                    tb->position, cb->box.half_extents,
-                    &contact
-                );
-            }
-            /* Sphere-capsule */
-            else if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_CAPSULE) {
-                collided = lg_collide_sphere_capsule(
-                    ta->position, ca->sphere.radius + ca->margin,
-                    tb->position, lg_quat_rotate(tb->rotation, lg_vec3_up()),
-                    cb->capsule.half_height, cb->capsule.radius + cb->margin,
-                    &contact
-                );
-            }
-            /* Capsule-sphere (swap entities) */
-            else if (ca->type == LG_SHAPE_CAPSULE && cb->type == LG_SHAPE_SPHERE) {
-                contact.entity_a = s->entities[j];  /* Swap: sphere becomes A */
-                contact.entity_b = s->entities[i];  /* Capsule becomes B */
-                collided = lg_collide_sphere_capsule(
-                    tb->position, cb->sphere.radius + cb->margin,
-                    ta->position, lg_quat_rotate(ta->rotation, lg_vec3_up()),
-                    ca->capsule.half_height, ca->capsule.radius + ca->margin,
-                    &contact
-                );
-            }
-            /* Capsule-capsule */
-            else if (ca->type == LG_SHAPE_CAPSULE && cb->type == LG_SHAPE_CAPSULE) {
-                collided = lg_collide_capsule_capsule(
-                    ta->position, lg_quat_rotate(ta->rotation, lg_vec3_up()),
-                    ca->capsule.half_height, ca->capsule.radius + ca->margin,
-                    tb->position, lg_quat_rotate(tb->rotation, lg_vec3_up()),
-                    cb->capsule.half_height, cb->capsule.radius + cb->margin,
-                    &contact
-                );
-            }
-            /* Sphere-cylinder */
-            else if (ca->type == LG_SHAPE_SPHERE && cb->type == LG_SHAPE_CYLINDER) {
-                collided = lg_collide_sphere_cylinder(
-                    ta->position, ca->sphere.radius + ca->margin,
-                    tb->position, lg_quat_rotate(tb->rotation, lg_vec3_up()),
-                    cb->cylinder.half_height, cb->cylinder.radius + cb->margin,
-                    &contact
-                );
-            }
-            /* Cylinder-sphere (swap) */
-            else if (ca->type == LG_SHAPE_CYLINDER && cb->type == LG_SHAPE_SPHERE) {
-                contact.entity_a = s->entities[j];
-                contact.entity_b = s->entities[i];
-                collided = lg_collide_sphere_cylinder(
-                    tb->position, cb->sphere.radius + cb->margin,
-                    ta->position, lg_quat_rotate(ta->rotation, lg_vec3_up()),
-                    ca->cylinder.half_height, ca->cylinder.radius + ca->margin,
-                    &contact
-                );
-            }
-
-            if (collided) {
+            if (lg_narrow_phase(s, i, j, &contact)) {
                 contacts[(*out_count)++] = contact;
             }
         }
     }
 }
+
 
 /*============================================================================
  * Simulation Step

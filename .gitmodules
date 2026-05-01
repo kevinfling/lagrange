@@ -1,0 +1,3 @@
+[submodule "libspatial"]
+	path = libspatial
+	url = https://github.com/kevinfling/libspatial.git

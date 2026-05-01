@@ -327,12 +327,12 @@ static inline void lg_ring_preset_saturn_main(lg_ring_system_t* rings) {
         LG_RING_ICE_WATER, &LG_DIST_SATURN_ICE);
     rings->zones[rings->n_zones-1].tau_normal = 0.4f;
     
-    /* Encke Gap: narrow gap at ~133.6e6 m carved by Pan */
+    /* Encke Gap: narrow gap at ~133.6e6 m carved by shepherd moon Pan */
     lg_ring_system_add_zone(rings, 133400e3f, 133800e3f, LG_ZONE_GAP,
         LG_RING_ICE_WATER, &LG_DIST_SATURN_ICE);
     rings->zones[rings->n_zones-1].tau_normal = 0.02f;
     
-    /* Keeler Gap: narrow gap at ~136.5e6 m carved by Daphnis */
+    /* Keeler Gap: narrow gap at ~136.5e6 m carved by shepherd moon Daphnis */
     lg_ring_system_add_zone(rings, 136400e3f, 136660e3f, LG_ZONE_GAP,
         LG_RING_ICE_WATER, &LG_DIST_SATURN_ICE);
     rings->zones[rings->n_zones-1].tau_normal = 0.02f;

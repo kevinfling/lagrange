@@ -419,6 +419,69 @@ static inline void lg_world_for_each(lg_world_t* world, lg_entity_callback_t cal
     }
 }
 
+/* Component-specific iteration (direct array access, no lookup overhead) */
+
+typedef void (*lg_transform_callback_t)(lg_world_t* world, lg_entity_t entity, lg_transform_t* transform, void* user_data);
+typedef void (*lg_body_callback_t)(lg_world_t* world, lg_entity_t entity, lg_body_t* body, void* user_data);
+typedef void (*lg_collider_callback_t)(lg_world_t* world, lg_entity_t entity, lg_collider_t* collider, void* user_data);
+typedef void (*lg_material_callback_t)(lg_world_t* world, lg_entity_t entity, lg_material_t* material, void* user_data);
+
+static inline void lg_world_for_each_transform(lg_world_t* world, lg_transform_callback_t callback, void* user_data) {
+    if (!world || !callback) return;
+    for (size_t i = 0; i < world->storage.count; i++) {
+        callback(world, world->storage.entities[i], &world->storage.transforms[i], user_data);
+    }
+}
+
+static inline void lg_world_for_each_body(lg_world_t* world, lg_body_callback_t callback, void* user_data) {
+    if (!world || !callback) return;
+    for (size_t i = 0; i < world->storage.count; i++) {
+        callback(world, world->storage.entities[i], &world->storage.bodies[i], user_data);
+    }
+}
+
+static inline void lg_world_for_each_collider(lg_world_t* world, lg_collider_callback_t callback, void* user_data) {
+    if (!world || !callback) return;
+    for (size_t i = 0; i < world->storage.count; i++) {
+        callback(world, world->storage.entities[i], &world->storage.colliders[i], user_data);
+    }
+}
+
+static inline void lg_world_for_each_material(lg_world_t* world, lg_material_callback_t callback, void* user_data) {
+    if (!world || !callback) return;
+    for (size_t i = 0; i < world->storage.count; i++) {
+        callback(world, world->storage.entities[i], &world->storage.materials[i], user_data);
+    }
+}
+
+/* Body-type filtered iteration */
+static inline void lg_world_for_each_dynamic(lg_world_t* world, lg_body_callback_t callback, void* user_data) {
+    if (!world || !callback) return;
+    for (size_t i = 0; i < world->storage.count; i++) {
+        if (world->storage.bodies[i].type == LG_BODY_DYNAMIC) {
+            callback(world, world->storage.entities[i], &world->storage.bodies[i], user_data);
+        }
+    }
+}
+
+static inline void lg_world_for_each_static(lg_world_t* world, lg_body_callback_t callback, void* user_data) {
+    if (!world || !callback) return;
+    for (size_t i = 0; i < world->storage.count; i++) {
+        if (world->storage.bodies[i].type == LG_BODY_STATIC) {
+            callback(world, world->storage.entities[i], &world->storage.bodies[i], user_data);
+        }
+    }
+}
+
+static inline void lg_world_for_each_kinematic(lg_world_t* world, lg_body_callback_t callback, void* user_data) {
+    if (!world || !callback) return;
+    for (size_t i = 0; i < world->storage.count; i++) {
+        if (world->storage.bodies[i].type == LG_BODY_KINEMATIC) {
+            callback(world, world->storage.entities[i], &world->storage.bodies[i], user_data);
+        }
+    }
+}
+
 /* Get count of entities */
 static inline size_t lg_world_entity_count(lg_world_t* world) {
     return world ? world->storage.count : 0;

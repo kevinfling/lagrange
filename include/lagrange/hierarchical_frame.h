@@ -330,69 +330,109 @@ static inline lg_vec3_t lg_node_world_position(const lg_node_t* node) {
 }
 
 /*============================================================================
- * 5. SPATIAL INDEXING (DYNAMIC BVH)
+ * 5. SPATIAL INDEXING (DYNAMIC BVH via libspatial)
  *===========================================================================*/
+
+/* Configure libspatial for LaGrange float coordinates */
+#define SPATIAL_NUMTYPE float
+
+#if defined(__clang__) || defined(__GNUC__)
+    #pragma GCC diagnostic push
+    #pragma GCC diagnostic ignored "-Wcast-align"
+#endif
+
+#include <libspatial/bvh.h>
+
+#if defined(__clang__) || defined(__GNUC__)
+    #pragma GCC diagnostic pop
+#endif
 
 typedef struct {
     lg_vec3_t min;
     lg_vec3_t max;
 } lg_aabb_t;
 
-typedef struct lg_bvh_node_s {
-    lg_aabb_t bounds;         /* World-space bounds */
-    lg_node_t* object;        /* NULL for internal nodes */
-    struct lg_bvh_node_s* left;
-    struct lg_bvh_node_s* right;
-    int depth;
-} lg_bvh_node_t;
-
 typedef struct {
-    lg_bvh_node_t* root;
-    lg_bvh_node_t* pool;      /* Preallocated node pool */
-    int pool_size;
-    int pool_used;
+    spatial_bvh* spatial;     /* libspatial BVH */
     uint32_t version;         /* Last updated frame */
 } lg_bvh_t;
 
-typedef struct { lg_aabb_t bounds; lg_node_t* node; } lg_bvh_leaf_t;
-
-static inline void lg_bvh_collect(lg_node_t* node, lg_bvh_leaf_t* leaves, int* n_leaves) {
+static inline void lg_bvh_collect_and_insert(lg_node_t* node, spatial_bvh* bvh) {
     if (!node) return;
     if (node->type == LG_NODE_BODY && (node->flags & LG_NODE_SIMULATE)) {
         float r = node->data.body.body.radius;
-        leaves[*n_leaves].bounds = (lg_aabb_t){
-            .min = {node->transform.world_pos.x - r, node->transform.world_pos.y - r, node->transform.world_pos.z - r},
-            .max = {node->transform.world_pos.x + r, node->transform.world_pos.y + r, node->transform.world_pos.z + r}
+        float min[3] = {
+            node->transform.world_pos.x - r,
+            node->transform.world_pos.y - r,
+            node->transform.world_pos.z - r
         };
-        leaves[*n_leaves].node = node;
-        (*n_leaves)++;
+        float max[3] = {
+            node->transform.world_pos.x + r,
+            node->transform.world_pos.y + r,
+            node->transform.world_pos.z + r
+        };
+        spatial_bvh_insert(bvh, min, max, (void*)node);
     }
     for (lg_node_t* child = node->first_child; child; child = child->next_sibling) {
-        lg_bvh_collect(child, leaves, n_leaves);
+        lg_bvh_collect_and_insert(child, bvh);
     }
+}
+
+typedef struct {
+    void (*callback)(lg_node_t* a, lg_node_t* b, void* user);
+    void* user;
+    lg_node_t* query_node;
+} lg_hframe_bvh_query_state_t;
+
+static inline bool lg_hframe_bvh_collision_callback(const float* min, const float* max,
+                                                     void* data, void* udata) {
+    (void)min;
+    (void)max;
+    lg_hframe_bvh_query_state_t* state = (lg_hframe_bvh_query_state_t*)udata;
+    lg_node_t* other = (lg_node_t*)data;
+    
+    /* Avoid self-collision and duplicate pairs (process only if other > query_node by pointer) */
+    if (other == state->query_node) return true;
+    if (other < state->query_node) return true;  /* Only process each pair once */
+    
+    state->callback(state->query_node, other, state->user);
+    return true;
 }
 
 /* Build BVH from scene graph (rebuild each frame for dynamic objects) */
 static inline void lg_bvh_build(lg_bvh_t* bvh, lg_node_t* scene_root) {
-    /* Collect all body nodes with bounds */
-    lg_bvh_leaf_t leaves[1024];
-    int n_leaves = 0;
+    if (bvh->spatial) {
+        spatial_bvh_free(bvh->spatial);
+    }
+    bvh->spatial = spatial_bvh_new();
+    if (!bvh->spatial) return;
     
-    /* Recursive collection */
-    lg_bvh_collect(scene_root, leaves, &n_leaves);
-    
-    /* Build tree (simplified: median split on longest axis) */
-    /* ... SAH-based construction would go here ... */
-    
+    lg_bvh_collect_and_insert(scene_root, bvh->spatial);
+    spatial_bvh_build(bvh->spatial);
     bvh->version++;
 }
 
 /* Query BVH for potential collisions */
-static inline void lg_bvh_query_collisions(lg_bvh_t* bvh, 
+static inline void lg_bvh_query_collisions(lg_bvh_t* bvh,
     void (*callback)(lg_node_t* a, lg_node_t* b, void* user),
     void* user) {
-    /* Traverse tree, report overlapping leaf pairs */
-    /* ... */
+    if (!bvh->spatial || !callback) return;
+    
+    /* Scan all primitives and query each against the BVH */
+    /* We use spatial_bvh_scan to iterate all leaves, then search for overlaps */
+    lg_hframe_bvh_query_state_t state = {
+        .callback = callback,
+        .user = user,
+        .query_node = NULL
+    };
+    
+    /* Since spatial_bvh doesn't provide a direct "all overlapping pairs" API,
+     * we scan all items and search the BVH for each item's bounds. */
+    for (int i = 0; i < bvh->spatial->prim_count; i++) {
+        spatial_bvh_prim* p = &bvh->spatial->prims[i];
+        state.query_node = (lg_node_t*)p->data;
+        spatial_bvh_search(bvh->spatial, p->min, p->max, lg_hframe_bvh_collision_callback, &state);
+    }
 }
 
 /*============================================================================

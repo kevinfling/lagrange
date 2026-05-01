@@ -30,6 +30,7 @@ option(LAGRANGE_WITH_CSPICE             "Fetch NASA CSPICE for astro validation 
 add_library(lagrange INTERFACE)
 target_include_directories(lagrange INTERFACE
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/libspatial/include>
     $<INSTALL_INTERFACE:include>
 )
 target_compile_features(lagrange INTERFACE c_std_11)
